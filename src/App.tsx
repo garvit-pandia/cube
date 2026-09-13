@@ -5,9 +5,11 @@ import {
   DEFAULT_SETTINGS,
   animationScaleFor,
   loadSettings,
+  loadSidebarOpen,
   prefersReducedMotion,
   safeStorage,
   saveSettings,
+  saveSidebarOpen,
   type Settings,
 } from './app/settings';
 import { formatMove } from './cube/notation';
@@ -28,6 +30,7 @@ const PHASE_LABEL: Record<CubeSnapshot['phase'], string> = {
   idle: 'Ready',
   ready: 'Scrambled',
   running: 'Solving',
+  solving: 'Auto-solving',
   done: 'Solved',
 };
 
@@ -42,6 +45,7 @@ export default function App() {
   const controllerRef = useRef<CubeController | null>(null);
   const sceneRef = useRef<SceneManager | null>(null);
   const historyRef = useRef<HTMLOListElement>(null);
+  const solvingRef = useRef(false);
   const [snapshot, setSnapshot] = useState<CubeSnapshot | null>(null);
   const [settings, setSettings] = useState<Settings>(() =>
     loadSettings(typeof window === 'undefined' ? null : safeStorage()),
@@ -49,6 +53,9 @@ export default function App() {
   const [osReducedMotion, setOsReducedMotion] = useState(false);
   const [runningMs, setRunningMs] = useState(0);
   const [sceneReady, setSceneReady] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    loadSidebarOpen(typeof window === 'undefined' ? null : safeStorage()),
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -109,12 +116,17 @@ export default function App() {
     saveSettings(safeStorage(), settings);
   }, [settings]);
 
+  useEffect(() => {
+    saveSidebarOpen(safeStorage(), sidebarOpen);
+  }, [sidebarOpen]);
+
   const playMove = useCallback((face: FaceLetter, turns: 1 | 2 | 3) => {
     controllerRef.current?.enqueue({ face, turns });
   }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (solvingRef.current) return;
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
@@ -156,6 +168,14 @@ export default function App() {
   const elapsed = phase === 'running' ? runningMs : (snapshot?.elapsedMs ?? 0);
   const justSolved = snapshot?.justSolved ?? false;
   const solved = snapshot?.solved ?? true;
+  const solving = snapshot?.solving ?? false;
+  const autoSolved = snapshot?.autoSolved ?? false;
+
+  // Keep the keydown handler's view of `solving` current without re-binding
+  // the listener on every snapshot.
+  useEffect(() => {
+    solvingRef.current = solving;
+  }, [solving]);
 
   const cubeDescription = solved
     ? 'Solved 3 by 3 Rubik\u2019s cube, every face showing one colour.'
@@ -164,7 +184,7 @@ export default function App() {
       } played.`;
 
   return (
-    <div className="app">
+    <div className={`app${sidebarOpen ? '' : ' is-sidebar-collapsed'}`}>
       <header className="header">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
@@ -174,6 +194,15 @@ export default function App() {
           </div>
         </div>
         <div className="header-status">
+          <button
+            type="button"
+            className="btn sidebar-toggle"
+            aria-expanded={sidebarOpen}
+            aria-controls="controls-panel"
+            onClick={() => setSidebarOpen((open) => !open)}
+          >
+            Controls
+          </button>
           <span className={`status-pill is-${phase}`} role="status">
             <span className="status-dot" aria-hidden="true" />
             {PHASE_LABEL[phase]}
@@ -253,12 +282,16 @@ export default function App() {
 
       {/* Screen readers get the result once, rather than a chattering clock. */}
       <p className="sr-only" role="status" aria-live="polite">
-        {justSolved && stats?.latest
-          ? `Solved in ${formatTime(stats.latest.timeMs)} using ${stats.latest.moves} moves.`
+        {justSolved
+          ? autoSolved
+            ? 'Cube solved automatically.'
+            : stats?.latest
+              ? `Solved in ${formatTime(stats.latest.timeMs)} using ${stats.latest.moves} moves.`
+              : ''
           : ''}
       </p>
 
-      <section className="panel" aria-label="Cube controls">
+      <section className="panel" id="controls-panel" aria-label="Cube controls">
         <div className="timer-bar">
           <div className="timer">
             <span
@@ -270,6 +303,23 @@ export default function App() {
             </span>
             <span className="timer-label">{PHASE_LABEL[phase]}</span>
           </div>
+          {solving && (
+            <div className="solve-progress" role="status" aria-live="polite">
+              <span className="solve-label">
+                <span>Auto-solving</span>
+                <span>
+                  {snapshot?.solveDone ?? 0}/{snapshot?.solveTotal ?? 0}
+                </span>
+              </span>
+              <span className="solve-bar">
+                <span
+                  style={{
+                    width: `${snapshot && snapshot.solveTotal > 0 ? Math.round((snapshot.solveDone / snapshot.solveTotal) * 100) : 0}%`,
+                  }}
+                />
+              </span>
+            </div>
+          )}
           <dl className="stats">
             <div>
               <dt>Best</dt>
@@ -293,16 +343,25 @@ export default function App() {
         <div className="panel-row">
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn"
             onClick={() => controller?.scrambleCube()}
+            disabled={solving}
           >
             Scramble
           </button>
           <button
             type="button"
+            className={`btn ${solving ? 'btn-danger' : 'btn-solve'}`}
+            onClick={() => (solving ? controller?.cancelSolve() : controller?.solve())}
+            disabled={!solving && !snapshot?.canSolve}
+          >
+            {solving ? 'Cancel' : 'Solve'}
+          </button>
+          <button
+            type="button"
             className="btn btn-ghost"
             onClick={() => controller?.undo()}
-            disabled={!snapshot?.canUndo}
+            disabled={solving || !snapshot?.canUndo}
           >
             Undo
           </button>
@@ -310,7 +369,7 @@ export default function App() {
             type="button"
             className="btn btn-ghost"
             onClick={() => controller?.redo()}
-            disabled={!snapshot?.canRedo}
+            disabled={solving || !snapshot?.canRedo}
           >
             Redo
           </button>
@@ -340,6 +399,7 @@ export default function App() {
                     className="btn btn-move"
                     onClick={() => playMove(face, variant.turns)}
                     aria-label={`${FACE_NAMES[face]} ${variant.title}`}
+                    disabled={solving}
                   >
                     {face}
                     {variant.suffix}

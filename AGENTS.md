@@ -31,15 +31,18 @@ One turn: `App.playMove` → `CubeController.enqueue()` (queues `{move, record:t
 2. **Move convention** (`CubeState.ts:115`). `quarters = ((((-turns * sign) % 4) + 4) % 4)` — clockwise-from-outside is `-turns` about the positive axis for `sign +1`. Flipping the sign inverts every turn. Rationale in `palette.ts` (`FACE_AXES` comment).
 3. **`turns` numbering** (`types.ts:23-30`, mirrored in `CubeController.startTurn` `:235-244`): `1` = `R`, `2` = `R2`, `3` = `R'`.
 4. **Sticker normals are cubie-local** (`CubeState.ts:11`). They never change; rotation carries them. Sticker meshes attach once at build (`CubeRenderer.ts:85-88`) — never reposition them.
-5. **Solved ≠ identity** (`CubeState.ts:140-145`). Solved = every face one uniform colour by logical placement; a centre may be spun. `CubeController.ts:286` also requires `history.length > 0` so a fresh cube can't score.
-6. **`record: false`** (`CubeController.ts:57-61`). Undo inverses (`:171`) and scramble turns (`:190`) animate through the queue but must not enter `history` nor start the clock (`:280`).
-7. **`justSolved` is one-shot** (`:228-230`). Consumed by the snapshot that carries it, cleared before listeners run — celebrate exactly once.
-8. **Wall-clock timer** (`:113-116`). `performance.now() - startedAt`, never summed frame deltas.
-9. **Delta clamp** (`:251`). `Math.min(rawDelta, 0.1)` stops a backgrounded tab teleporting through queued turns.
+5. **Solved ≠ identity** (`CubeState.ts:140-145`). Solved = every face one uniform colour by logical placement; a centre may be spun. `CubeController.afterTurnCompleted` also requires `history.length > 0` so a fresh cube can't score.
+6. **`record: false`** (`CubeController.QueuedMove`). Undo inverses and scramble turns animate through the queue but must not enter `history` nor start the clock.
+7. **`justSolved` / `autoSolved` are one-shot** (`CubeController.scheduleNotify`). Consumed by the snapshot that carries them, cleared before listeners run — celebrate exactly once.
+8. **Wall-clock timer** (`CubeController.get elapsed`). `performance.now() - startedAt`, never summed frame deltas.
+9. **Delta clamp** (`CubeController.update`). `Math.min(rawDelta, 0.1)` stops a backgrounded tab teleporting through queued turns.
 10. **`PCFShadowMap` is deliberate** (`SceneManager.ts:160-162`). `PCFSoft` ignores `shadow.radius` (fixed kernel); `radius = 14` (`:251`) needs PCF tap scaling. Don't "upgrade" it.
 11. **`resetView` flushes OrbitControls inertia** (`:319-322`). One `update()` with damping off zeroes `sphericalDelta`; without it drag inertia fights the reset lerp.
 12. **`setLayerRotation` never touches base transforms** (`CubeRenderer.ts:127-142`); `sync` always restores exact alignment.
 13. **Camera framing is computed** (`SceneManager.ts:126-145`, `CONTENT_RADIUS`). Fits the tighter FOV axis so narrow viewports can't clip the cube; `handleResize` (`:300-310`) only re-frames if the user hasn't taken over the camera.
+14. **The turn log drives auto-solve** (`CubeController.applied`). Every turn that lands in `state` — user, undo inverse, scramble, or solve — is appended in `update()`. `solve()` plays `simplifyMoves(invertMoves(applied + in-flight))`, which is correct from any session state; skip the push and every later solution is silently wrong. Cleared on `reset()` and whenever the cube reaches solved.
+15. **Auto-solve is not a solve** (`solve`/`cancelSolve`). Solve turns are `record: false, solve: true`: no `history`, no session record, clock frozen (phase `solving`), `canUndo` false, input guarded at the controller and disabled in the UI. Cancel drops remaining solve turns, restores the prior phase, and re-bases `startedAt` when resuming a running attempt. `autoSolved` is one-shot and drives the separate screen-reader announcement.
+16. **`solve()` snapshots the log synchronously.** It captures `applied` + the in-flight turn and replaces the queue in one turn; yielding in between would let an unaccounted turn land and break the inversion.
 
 ## Development Commands
 
@@ -79,16 +82,17 @@ Stale-module check (WSL2 polling hazard, below): `curl -s http://localhost:5179/
 ## Testing & QA
 
 - Vitest 5, **no vitest config** — defaults (`environment: 'node'`, `globals: false`), so every suite imports `{ describe, expect, it } from 'vitest'` explicitly.
-- **86 tests, 4 colocated suites** (`<Module>.test.ts`), all pure logic — no DOM/WebGL/three.js. Currently green with build + lint.
+- **106 tests, 5 colocated suites** (`<Module>.test.ts`), all pure logic — no DOM/WebGL/three.js. Currently green with build + lint.
 
 | Suite | Pins |
 |---|---|
 | `src/cube/CubeState.test.ts` (52) | 27 cubelets / 54 stickers; `it.each` face-identity sequences; inverse round-trips; 5000-turn drift invariants; layer selection; Singmaster direction table |
 | `src/session/SolveSession.test.ts` (16) | trimmed Ao5/Ao12, recent-first, persistence round-trip, corrupt-JSON + per-entry validation, 200-record cap, `formatTime` |
+| `src/app/settings.test.ts` (16) | settings defaults/round-trip/corrupt payload/per-field rejection + sidebar-open persistence (corrupt → open, null storage safe) |
+| `src/cube/notation.test.ts` (12) | `simplifyMoves` cancellation/combination invariants + seeded `invertMoves`→`simplifyMoves` round-trip against `CubeState` (the auto-solve math) |
 | `src/cube/scramble.test.ts` (10) | axis alternation, no back-to-back face/cancellation, full face coverage, seeded reproducibility, parse/format round-trip |
-| `src/app/settings.test.ts` (8) | defaults, round-trip, corrupt payload, per-field rejection, null-storage safety, `animationScaleFor` ordering |
 
 - New tests: colocate, import vitest explicitly, use seeded `mulberry32(seed)` (not `Math.random`), inject fakes (`StorageLike`, `() => number`). Reuse `expectLegalCube` / `expectIntegralRigidBody` / `independentSolvedCheck` from `CubeState.test.ts`.
-- `mulberry32` is duplicated in two suites, `fakeStorage` in two suites — consolidate rather than copying a third time.
-- **Gaps (intentional):** no tests for `CubeController`, `src/render/`, `notation.ts`, palettes/types, `App`/`main`. Rendering is verified in a real browser via the `window.__cube3` seam — do not add jsdom to test it.
+- `mulberry32` now exists in three suites (`CubeState`, `scramble`, `notation`) and `fakeStorage` in two — a fourth copy needs consolidation into a shared helper instead.
+- **Gaps (intentional):** no tests for `CubeController` (including the solve state machine), `src/render/`, palettes/types, `App`/`main`. Rendering and interaction are verified in a real browser via the `window.__cube3` seam — do not add jsdom to test it.
 - **Known dead code:** `visualTurn` and `combineMoves` (`notation.ts`) are exported but unreferenced; `public/icons.svg` is an unreferenced ~5 KB sprite copied into every build. Leave alone unless removing deliberately.

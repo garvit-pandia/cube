@@ -58,3 +58,23 @@ export function combineMoves(first: Move, second: Move): Move | null {
   if (total === 0) return null;
   return { face: first.face, turns: total as 1 | 2 | 3 };
 }
+
+/**
+ * Fold adjacent turns on the same face: `R R` -> `R2`, `R2 R` -> `R'`, and
+ * pairs that cancel (`R R'`) disappear entirely. Turns on different faces keep
+ * their order. Used to shorten auto-solve sequences.
+ */
+export function simplifyMoves(moves: readonly Move[]): Move[] {
+  const out: Move[] = [];
+  for (const move of moves) {
+    const last = out[out.length - 1];
+    if (last && last.face === move.face) {
+      const total = (last.turns + move.turns) % 4;
+      if (total === 0) out.pop();
+      else out[out.length - 1] = { face: move.face, turns: total as 1 | 2 | 3 };
+    } else {
+      out.push(move);
+    }
+  }
+  return out;
+}

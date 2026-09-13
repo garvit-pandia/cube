@@ -81,3 +81,27 @@ export function safeStorage(): StorageLike | null {
     return null;
   }
 }
+
+const SIDEBAR_KEY = 'cube3:sidebar';
+
+/** Whether the controls sidebar starts open; corrupt/missing storage = open. */
+export function loadSidebarOpen(storage: StorageLike | null): boolean {
+  if (!storage) return true;
+  try {
+    const raw = storage.getItem(SIDEBAR_KEY);
+    if (raw === null) return true;
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'boolean' ? parsed : true;
+  } catch {
+    return true;
+  }
+}
+
+export function saveSidebarOpen(storage: StorageLike | null, open: boolean): void {
+  if (!storage) return;
+  try {
+    storage.setItem(SIDEBAR_KEY, JSON.stringify(open));
+  } catch {
+    // Private mode / quota failures must not break the app.
+  }
+}

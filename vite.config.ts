@@ -2,10 +2,11 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
-export default defineConfig({
-  // Project site at https://garvit-pandia.github.io/cube/ — build assets
-  // must be served under /cube/. Dev server is unaffected.
-  base: '/cube/',
+export default defineConfig(({ command }) => ({
+  // Project site at https://garvit-pandia.github.io/cube/ — built assets must
+  // be served under /cube/. Dev stays on the bare origin so the pinned
+  // localhost:5179 URL in the docs and PORT-REGISTRY keeps working.
+  base: command === 'build' ? '/cube/' : '/',
   plugins: [react()],
   server: {
     // Own port per ../PORT-REGISTRY.md. strictPort fails fast on collision
@@ -16,4 +17,4 @@ export default defineConfig({
     // serves stale modules, which makes browser verification lie.
     watch: { usePolling: true, interval: 250 },
   },
-})
+}))

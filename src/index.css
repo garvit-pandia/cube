@@ -11,6 +11,7 @@
   --red: #ff5d5d;
   --radius: 14px;
   --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --sidebar-width: 380px;
 
   color-scheme: dark;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -127,6 +128,20 @@ body {
 
 .status-pill.is-running {
   color: var(--accent);
+}
+
+.status-pill.is-solving {
+  color: var(--accent);
+}
+
+.status-pill.is-solving .status-dot {
+  animation: status-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .move-count {
@@ -299,12 +314,29 @@ body {
   border-color: rgba(150, 190, 255, 0.7);
 }
 
+.btn-solve {
+  background: linear-gradient(180deg, #35d07f, #22a862);
+  border-color: rgba(90, 220, 160, 0.5);
+  color: #04170d;
+  font-weight: 650;
+}
+
+.btn-solve:hover {
+  background: linear-gradient(180deg, #43dd8d, #29b56c);
+  border-color: rgba(120, 235, 180, 0.65);
+}
+
 .btn-micro {
   font-size: 0.68rem;
   padding: 2px 9px;
   min-height: 24px;
   border-radius: 6px;
   color: var(--text-dim);
+}
+
+/* Hidden until the desktop/landscape layouts enable it. */
+.sidebar-toggle {
+  display: none;
 }
 
 .keyboard-hint {
@@ -451,6 +483,10 @@ kbd {
   color: var(--green);
 }
 
+.timer-value.is-solving {
+  color: var(--accent);
+}
+
 .timer-label {
   font-size: 0.68rem;
   letter-spacing: 0.1em;
@@ -516,6 +552,39 @@ kbd {
 .solve-moves {
   font-size: 0.7rem;
   color: var(--text-faint);
+}
+
+.solve-progress {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.solve-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.solve-bar {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.solve-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4c8dff, #35d07f);
+  transition: width 0.2s ease;
 }
 
 .info-block-wide {
@@ -746,6 +815,72 @@ kbd {
 
 /* ---------- responsive ---------- */
 
+/* Desktop: the stage owns the left column and controls become a collapsible
+   right sidebar. */
+@media (min-width: 1024px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    grid-template-rows: auto minmax(0, 1fr);
+    max-width: 1600px;
+  }
+
+  .header {
+    grid-column: 1 / -1;
+  }
+
+  .stage {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .panel {
+    grid-column: 2;
+    grid-row: 2;
+    align-content: start;
+  }
+
+  .sidebar-toggle {
+    display: inline-flex;
+  }
+
+  .timer-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* In a column flex box, `flex-basis` controls height; the progress block
+     must hug its content instead of claiming a 160px-tall band. */
+  .solve-progress {
+    flex: 0 0 auto;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+  }
+
+  .moves {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .info {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app.is-sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app.is-sidebar-collapsed .stage {
+    grid-column: 1 / -1;
+  }
+
+  .app.is-sidebar-collapsed .panel {
+    display: none;
+  }
+}
+
 /* Tablet and below: keep the cube large and let the panel scroll beneath it
    rather than squeezing the viewport down to a sliver. */
 @media (max-width: 720px) {
@@ -860,6 +995,22 @@ kbd {
     grid-column: 2;
   }
 
+  .sidebar-toggle {
+    display: inline-flex;
+  }
+
+  .app.is-sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app.is-sidebar-collapsed .stage {
+    grid-column: 1 / -1;
+  }
+
+  .app.is-sidebar-collapsed .panel {
+    display: none;
+  }
+
   .moves {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
@@ -888,6 +1039,14 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .btn {
+    transition: none;
+  }
+
+  .status-pill.is-solving .status-dot {
+    animation: none;
+  }
+
+  .solve-bar > span {
     transition: none;
   }
 }

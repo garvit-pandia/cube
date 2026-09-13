@@ -1,5 +1,5 @@
 import { CubeState } from '../cube/CubeState';
-import { invertMove } from '../cube/notation';
+import { invertMove, invertMoves, simplifyMoves } from '../cube/notation';
 import { FACE_AXES } from '../cube/palette';
 import { generateScramble, formatSequence } from '../cube/scramble';
 import type { Move } from '../cube/types';
@@ -31,10 +31,11 @@ function safeLocalStorage(): StorageLike | null {
 
 /**
  * `idle` — untouched cube. `ready` — scrambled (or otherwise mixed) but the
- * solver has not moved yet. `running` — the clock is going. `done` — solved and
- * recorded.
+ * solver has not moved yet. `running` — the clock is going. `solving` — the
+ * auto-solve animation is driving the queue. `done` — solved; recorded when
+ * the user solved it, bare when the auto-solve did.
  */
-export type SolvePhase = 'idle' | 'ready' | 'running' | 'done';
+export type SolvePhase = 'idle' | 'ready' | 'running' | 'solving' | 'done';
 
 export interface CubeSnapshot {
   readonly history: readonly Move[];
@@ -50,14 +51,26 @@ export interface CubeSnapshot {
   readonly stats: SolveStats;
   /** Set for the snapshot that first reports a finished solve, for UI feedback. */
   readonly justSolved: boolean;
+  /** True when that finished solve was the auto-solve, not the user. */
+  readonly autoSolved: boolean;
+  /** True while the auto-solve is driving the queue. */
+  readonly solving: boolean;
+  /** Total turns in the running auto-solve; 0 when not solving. */
+  readonly solveTotal: number;
+  /** Auto-solve turns that have already landed in the logical state. */
+  readonly solveDone: number;
+  /** True when `solve()` has work to do. */
+  readonly canSolve: boolean;
 }
 
 type Listener = (snapshot: CubeSnapshot) => void;
 
 interface QueuedMove {
   readonly move: Move;
-  /** False for the inverse turns that undo plays, which must not be logged. */
+  /** False for turns the machine plays on the user's behalf. */
   readonly record: boolean;
+  /** True for turns belonging to the auto-solve animation. */
+  readonly solve?: boolean;
 }
 
 interface ActiveTurn {
@@ -95,6 +108,19 @@ export class CubeController {
   private listeners = new Set<Listener>();
   private notifyScheduled = false;
   private justSolved = false;
+  private autoSolved = false;
+
+  /**
+   * Every turn that has landed in `state`, oldest first — recorded or not.
+   * `solve()` is the inverse of this log, so it is the one piece of
+   * bookkeeping that makes "solve from any state" exact.
+   */
+  private applied: Move[] = [];
+
+  private solving = false;
+  private solveTotal = 0;
+  private solveDone = 0;
+  private phaseBeforeSolve: SolvePhase = 'idle';
 
   constructor(storage: StorageLike | null = safeLocalStorage()) {
     this.session = new SolveSession(storage);
@@ -128,7 +154,7 @@ export class CubeController {
       moveCount: this.history.length,
       solved: this.state.isSolved(),
       busy: this.active !== null || this.queue.length > 0,
-      canUndo: this.history.length > 0 || this.queue.length > 0,
+      canUndo: !this.solving && (this.history.length > 0 || this.queue.length > 0),
       canRedo: this.redoStack.length > 0,
       latest: this.history[this.history.length - 1] ?? null,
       scramble: [...this.scramble],
@@ -136,18 +162,24 @@ export class CubeController {
       elapsedMs: this.elapsed,
       stats: this.session.stats(),
       justSolved: this.justSolved,
+      autoSolved: this.autoSolved,
+      solving: this.solving,
+      solveTotal: this.solveTotal,
+      solveDone: this.solveDone,
+      canSolve: this.canSolve(),
     };
   }
 
   /** Queue a turn. Any new turn invalidates the redo path. */
   enqueue(move: Move): void {
+    if (this.solving) return;
     this.redoStack = [];
     this.queue.push({ move, record: true });
     this.scheduleNotify();
   }
 
   enqueueAll(moves: readonly Move[]): void {
-    if (moves.length === 0) return;
+    if (this.solving || moves.length === 0) return;
     this.redoStack = [];
     for (const move of moves) this.queue.push({ move, record: true });
     this.scheduleNotify();
@@ -159,6 +191,7 @@ export class CubeController {
    * itself not recorded.
    */
   undo(): void {
+    if (this.solving) return;
     if (this.queue.length > 0) {
       const dropped = this.queue.pop();
       if (dropped?.record) this.redoStack.push(dropped.move);
@@ -173,9 +206,52 @@ export class CubeController {
   }
 
   redo(): void {
+    if (this.solving) return;
     const next = this.redoStack.pop();
     if (!next) return;
     this.queue.push({ move: next, record: true });
+    this.scheduleNotify();
+  }
+
+  /**
+   * Play the cube back to solved. The solution is the inverse of every turn
+   * that has landed this session, so it is always correct from any mixed
+   * state. Turns still waiting in the queue are discarded; the in-flight turn
+   * finishes and the solution undoes it too. Auto-solve turns are not
+   * recorded: the clock freezes and no session record is written.
+   */
+  solve(): Move[] | null {
+    if (this.solving || !this.canSolve()) return null;
+
+    const log = [...this.applied];
+    if (this.active) log.push(this.active.entry.move);
+    const solution = simplifyMoves(invertMoves(log));
+    if (solution.length === 0) return null;
+
+    this.redoStack = [];
+    this.queue = solution.map((move): QueuedMove => ({ move, record: false, solve: true }));
+    this.phaseBeforeSolve = this.phase;
+    if (this.phase === 'running') this.elapsedMs = this.elapsed;
+    this.solving = true;
+    this.solveTotal = solution.length;
+    this.solveDone = 0;
+    this.phase = 'solving';
+    this.justSolved = false;
+    this.autoSolved = false;
+    this.scheduleNotify();
+    return [...solution];
+  }
+
+  /** Stop the auto-solve after the in-flight turn; already-played turns stay. */
+  cancelSolve(): void {
+    if (!this.solving) return;
+    this.queue = this.queue.filter((entry) => !entry.solve);
+    this.solving = false;
+    this.solveTotal = 0;
+    this.solveDone = 0;
+    this.phase = this.phaseBeforeSolve === 'solving' ? 'ready' : this.phaseBeforeSolve;
+    // Resume a paused timed attempt from where it stopped.
+    if (this.phase === 'running') this.startedAt = performance.now() - this.elapsedMs;
     this.scheduleNotify();
   }
 
@@ -185,12 +261,14 @@ export class CubeController {
    * move history — the history is the solver's moves, matching a timed solve.
    */
   scrambleCube(length = 22): Move[] {
+    if (this.solving) return [...this.scramble];
     this.scramble = generateScramble(length);
     this.redoStack = [];
     for (const move of this.scramble) this.queue.push({ move, record: false });
     this.phase = 'ready';
     this.elapsedMs = 0;
     this.justSolved = false;
+    this.autoSolved = false;
     this.scheduleNotify();
     return [...this.scramble];
   }
@@ -200,10 +278,16 @@ export class CubeController {
     this.redoStack = [];
     this.history = [];
     this.scramble = [];
+    this.applied = [];
     this.active = null;
+    this.solving = false;
+    this.solveTotal = 0;
+    this.solveDone = 0;
+    this.phaseBeforeSolve = 'idle';
     this.phase = 'idle';
     this.elapsedMs = 0;
     this.justSolved = false;
+    this.autoSolved = false;
     this.renderer.clearLayerRotation();
     this.state.reset();
     this.renderer.sync(this.state.all());
@@ -219,15 +303,25 @@ export class CubeController {
     return this.active !== null || this.queue.length > 0;
   }
 
+  /** True when `solve()` would have something to do. */
+  private canSolve(): boolean {
+    return (
+      !this.solving &&
+      !this.state.isSolved() &&
+      (this.applied.length > 0 || this.active !== null)
+    );
+  }
+
   private scheduleNotify(): void {
     if (this.notifyScheduled) return;
     this.notifyScheduled = true;
     queueMicrotask(() => {
       this.notifyScheduled = false;
       const snapshot = this.snapshot();
-      // `justSolved` is a one-shot flag: it is consumed by the notification
-      // that carries it, so the UI can celebrate exactly once.
+      // `justSolved` / `autoSolved` are one-shot flags: they are consumed by
+      // the notification that carries them, so the UI can celebrate once.
       this.justSolved = false;
+      this.autoSolved = false;
       for (const listener of this.listeners) listener(snapshot);
     });
   }
@@ -265,6 +359,8 @@ export class CubeController {
 
     if (progress >= 1) {
       this.state.applyMove(active.entry.move);
+      this.applied.push(active.entry.move);
+      if (active.entry.solve) this.solveDone++;
       if (active.entry.record) this.history.push(active.entry.move);
       this.active = null;
       // Exact integer-derived transforms replace the interpolated ones.
@@ -277,22 +373,42 @@ export class CubeController {
   /** Advance the solve lifecycle once a turn has landed in the logical state. */
   private afterTurnCompleted(entry: QueuedMove): void {
     // The clock starts on the solver's first real turn, not on the scramble.
-    if (entry.record && this.phase !== 'running' && this.phase !== 'done') {
+    // A user turn still in flight when the auto-solve starts must not tick it.
+    if (!this.solving && entry.record && this.phase !== 'running' && this.phase !== 'done') {
       this.phase = 'running';
       this.startedAt = performance.now();
       this.elapsedMs = 0;
+    }
+
+    if (this.solving) {
+      // Last auto-solve turn landed: back to solved, but not the user's solve,
+      // so no record is written and the clock stays at zero.
+      if (this.queue.length === 0) {
+        this.solving = false;
+        this.solveTotal = 0;
+        this.solveDone = 0;
+        this.elapsedMs = 0;
+        this.phase = 'done';
+        this.justSolved = this.state.isSolved();
+        this.autoSolved = this.justSolved;
+        this.applied = [];
+      }
+      return;
     }
 
     if (this.phase === 'running' && this.state.isSolved() && this.history.length > 0) {
       this.elapsedMs = performance.now() - this.startedAt;
       this.phase = 'done';
       this.justSolved = true;
+      this.autoSolved = false;
       this.session.add({
         timeMs: Math.round(this.elapsedMs),
         moves: this.history.length,
         scramble: formatSequence(this.scramble),
         at: Date.now(),
       });
+      // The cube is at the identity again; the turn log restarts with it.
+      this.applied = [];
     }
   }
 }

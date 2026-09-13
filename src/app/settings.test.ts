@@ -4,7 +4,9 @@ import {
   DEFAULT_SETTINGS,
   animationScaleFor,
   loadSettings,
+  loadSidebarOpen,
   saveSettings,
+  saveSidebarOpen,
   type Settings,
 } from './settings';
 import type { StorageLike } from '../session/SolveSession';
@@ -70,5 +72,54 @@ describe('animation scale', () => {
     expect(fast).toBeLessThan(1);
     expect(fast).toBeGreaterThan(instant);
     expect(instant).toBeGreaterThan(0);
+  });
+});
+
+describe('sidebar persistence', () => {
+  it('defaults to open without storage', () => {
+    expect(loadSidebarOpen(null)).toBe(true);
+  });
+
+  it('defaults to open when nothing is stored', () => {
+    const { storage } = fakeStorage();
+    expect(loadSidebarOpen(storage)).toBe(true);
+  });
+
+  it('defaults to open on a corrupt payload', () => {
+    const { storage } = fakeStorage({ 'cube3:sidebar': 'not json at all' });
+    expect(() => loadSidebarOpen(storage)).not.toThrow();
+    expect(loadSidebarOpen(storage)).toBe(true);
+  });
+
+  it('defaults to open for non-boolean payloads', () => {
+    const { storage } = fakeStorage({ 'cube3:sidebar': '"yes"' });
+    expect(loadSidebarOpen(storage)).toBe(true);
+    const { storage: numeric } = fakeStorage({ 'cube3:sidebar': '1' });
+    expect(loadSidebarOpen(numeric)).toBe(true);
+  });
+
+  it('reads a stored false', () => {
+    const { storage } = fakeStorage({ 'cube3:sidebar': 'false' });
+    expect(loadSidebarOpen(storage)).toBe(false);
+  });
+
+  it('round-trips closed and open through storage', () => {
+    const { storage } = fakeStorage();
+    saveSidebarOpen(storage, false);
+    expect(loadSidebarOpen(storage)).toBe(false);
+    saveSidebarOpen(storage, true);
+    expect(loadSidebarOpen(storage)).toBe(true);
+  });
+
+  it('never throws without storage', () => {
+    expect(() => saveSidebarOpen(null, false)).not.toThrow();
+  });
+
+  it('overwrites the previous value when saved twice', () => {
+    const { storage, data } = fakeStorage();
+    saveSidebarOpen(storage, false);
+    saveSidebarOpen(storage, true);
+    expect(loadSidebarOpen(storage)).toBe(true);
+    expect(data['cube3:sidebar']).toBe('true');
   });
 });
