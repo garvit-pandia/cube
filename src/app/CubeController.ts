@@ -1,0 +1,298 @@
+import { CubeState } from '../cube/CubeState';
+import { invertMove } from '../cube/notation';
+import { FACE_AXES } from '../cube/palette';
+import { generateScramble, formatSequence } from '../cube/scramble';
+import type { Move } from '../cube/types';
+import type { SceneManager } from '../render/SceneManager';
+import { CubeRenderer } from '../render/CubeRenderer';
+import { SolveSession, type SolveStats, type StorageLike } from '../session/SolveSession';
+
+/** Easing for a layer turn: quick start, gentle settle. */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/** A double turn covers twice the arc, so it gets a longer window than a quarter. */
+function durationFor(turns: 1 | 2 | 3, scale: number): number {
+  return (turns === 2 ? 300 : 230) * scale;
+}
+
+/** localStorage is unavailable in some privacy modes; never let that break a solve. */
+function safeLocalStorage(): StorageLike | null {
+  try {
+    const probe = '__cube3_probe__';
+    window.localStorage.setItem(probe, '1');
+    window.localStorage.removeItem(probe);
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `idle` — untouched cube. `ready` — scrambled (or otherwise mixed) but the
+ * solver has not moved yet. `running` — the clock is going. `done` — solved and
+ * recorded.
+ */
+export type SolvePhase = 'idle' | 'ready' | 'running' | 'done';
+
+export interface CubeSnapshot {
+  readonly history: readonly Move[];
+  readonly moveCount: number;
+  readonly solved: boolean;
+  readonly busy: boolean;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly latest: Move | null;
+  readonly scramble: readonly Move[];
+  readonly phase: SolvePhase;
+  readonly elapsedMs: number;
+  readonly stats: SolveStats;
+  /** Set for the snapshot that first reports a finished solve, for UI feedback. */
+  readonly justSolved: boolean;
+}
+
+type Listener = (snapshot: CubeSnapshot) => void;
+
+interface QueuedMove {
+  readonly move: Move;
+  /** False for the inverse turns that undo plays, which must not be logged. */
+  readonly record: boolean;
+}
+
+interface ActiveTurn {
+  readonly entry: QueuedMove;
+  readonly ids: readonly number[];
+  readonly axis: 'x' | 'y' | 'z';
+  readonly angle: number;
+  readonly duration: number;
+  elapsed: number;
+}
+
+/**
+ * Drives the cube: owns the authoritative `CubeState`, mirrors it into the
+ * `CubeRenderer`, and serialises moves through an animation queue so logical
+ * state and visuals can never disagree. A turn's interpolated transform is
+ * discarded the moment it finishes and replaced by exact integer-derived
+ * transforms, so nothing accumulates drift.
+ */
+export class CubeController {
+  readonly state = new CubeState();
+  readonly renderer = new CubeRenderer();
+  readonly session: SolveSession;
+
+  history: Move[] = [];
+  scramble: Move[] = [];
+  phase: SolvePhase = 'idle';
+  elapsedMs = 0;
+  animationScale = 1;
+
+  private startedAt = 0;
+
+  private queue: QueuedMove[] = [];
+  private active: ActiveTurn | null = null;
+  private redoStack: Move[] = [];
+  private listeners = new Set<Listener>();
+  private notifyScheduled = false;
+  private justSolved = false;
+
+  constructor(storage: StorageLike | null = safeLocalStorage()) {
+    this.session = new SolveSession(storage);
+  }
+
+  attach(scene: SceneManager): void {
+    this.renderer.build(this.state.all());
+    scene.scene.add(this.renderer.object);
+    scene.onBeforeRender = (delta) => this.update(delta);
+  }
+
+  /**
+   * Elapsed solve time. Measured from the wall clock rather than by summing
+   * frame deltas: a dropped frame must never make a timed solve read short.
+   */
+  get elapsed(): number {
+    if (this.phase === 'running') return performance.now() - this.startedAt;
+    return this.elapsedMs;
+  }
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  snapshot(): CubeSnapshot {
+    return {
+      history: [...this.history],
+      moveCount: this.history.length,
+      solved: this.state.isSolved(),
+      busy: this.active !== null || this.queue.length > 0,
+      canUndo: this.history.length > 0 || this.queue.length > 0,
+      canRedo: this.redoStack.length > 0,
+      latest: this.history[this.history.length - 1] ?? null,
+      scramble: [...this.scramble],
+      phase: this.phase,
+      elapsedMs: this.elapsed,
+      stats: this.session.stats(),
+      justSolved: this.justSolved,
+    };
+  }
+
+  /** Queue a turn. Any new turn invalidates the redo path. */
+  enqueue(move: Move): void {
+    this.redoStack = [];
+    this.queue.push({ move, record: true });
+    this.scheduleNotify();
+  }
+
+  enqueueAll(moves: readonly Move[]): void {
+    if (moves.length === 0) return;
+    this.redoStack = [];
+    for (const move of moves) this.queue.push({ move, record: true });
+    this.scheduleNotify();
+  }
+
+  /**
+   * Reverse the newest move. A turn that has not started yet is simply
+   * dropped; one already on screen is undone by playing its inverse, which is
+   * itself not recorded.
+   */
+  undo(): void {
+    if (this.queue.length > 0) {
+      const dropped = this.queue.pop();
+      if (dropped?.record) this.redoStack.push(dropped.move);
+      this.scheduleNotify();
+      return;
+    }
+    const last = this.history.pop();
+    if (!last) return;
+    this.redoStack.push(last);
+    this.queue.push({ move: invertMove(last), record: false });
+    this.scheduleNotify();
+  }
+
+  redo(): void {
+    const next = this.redoStack.pop();
+    if (!next) return;
+    this.queue.push({ move: next, record: true });
+    this.scheduleNotify();
+  }
+
+  /**
+   * Scramble the cube. Scramble turns are played through the same queue as
+   * user turns so the whole thing animates, but they are not recorded in the
+   * move history — the history is the solver's moves, matching a timed solve.
+   */
+  scrambleCube(length = 22): Move[] {
+    this.scramble = generateScramble(length);
+    this.redoStack = [];
+    for (const move of this.scramble) this.queue.push({ move, record: false });
+    this.phase = 'ready';
+    this.elapsedMs = 0;
+    this.justSolved = false;
+    this.scheduleNotify();
+    return [...this.scramble];
+  }
+
+  reset(): void {
+    this.queue = [];
+    this.redoStack = [];
+    this.history = [];
+    this.scramble = [];
+    this.active = null;
+    this.phase = 'idle';
+    this.elapsedMs = 0;
+    this.justSolved = false;
+    this.renderer.clearLayerRotation();
+    this.state.reset();
+    this.renderer.sync(this.state.all());
+    this.scheduleNotify();
+  }
+
+  clearSession(): void {
+    this.session.clear();
+    this.scheduleNotify();
+  }
+
+  isBusy(): boolean {
+    return this.active !== null || this.queue.length > 0;
+  }
+
+  private scheduleNotify(): void {
+    if (this.notifyScheduled) return;
+    this.notifyScheduled = true;
+    queueMicrotask(() => {
+      this.notifyScheduled = false;
+      const snapshot = this.snapshot();
+      // `justSolved` is a one-shot flag: it is consumed by the notification
+      // that carries it, so the UI can celebrate exactly once.
+      this.justSolved = false;
+      for (const listener of this.listeners) listener(snapshot);
+    });
+  }
+
+  private startTurn(entry: QueuedMove): void {
+    const { axis, sign } = FACE_AXES[entry.move.face];
+    const quarters = entry.move.turns === 1 ? 1 : entry.move.turns === 2 ? 2 : -1;
+    this.active = {
+      entry,
+      ids: this.state.layerIds(entry.move.face),
+      axis,
+      angle: quarters * (Math.PI / 2) * -sign,
+      duration: durationFor(entry.move.turns, this.animationScale),
+      elapsed: 0,
+    };
+  }
+
+  private update(rawDelta: number): void {
+    // A backgrounded tab can deliver a huge delta; cap it so a move never
+    // teleports through several queued turns of easing in one frame.
+    const delta = Math.min(rawDelta, 0.1);
+
+    if (!this.active) {
+      const next = this.queue.shift();
+      if (!next) return;
+      this.startTurn(next);
+    }
+
+    const active = this.active;
+    if (!active) return;
+
+    active.elapsed += delta * 1000;
+    const progress = Math.min(active.elapsed / active.duration, 1);
+    this.renderer.setLayerRotation(active.axis, active.ids, active.angle * easeInOutCubic(progress));
+
+    if (progress >= 1) {
+      this.state.applyMove(active.entry.move);
+      if (active.entry.record) this.history.push(active.entry.move);
+      this.active = null;
+      // Exact integer-derived transforms replace the interpolated ones.
+      this.renderer.sync(this.state.all());
+      this.afterTurnCompleted(active.entry);
+      this.scheduleNotify();
+    }
+  }
+
+  /** Advance the solve lifecycle once a turn has landed in the logical state. */
+  private afterTurnCompleted(entry: QueuedMove): void {
+    // The clock starts on the solver's first real turn, not on the scramble.
+    if (entry.record && this.phase !== 'running' && this.phase !== 'done') {
+      this.phase = 'running';
+      this.startedAt = performance.now();
+      this.elapsedMs = 0;
+    }
+
+    if (this.phase === 'running' && this.state.isSolved() && this.history.length > 0) {
+      this.elapsedMs = performance.now() - this.startedAt;
+      this.phase = 'done';
+      this.justSolved = true;
+      this.session.add({
+        timeMs: Math.round(this.elapsedMs),
+        moves: this.history.length,
+        scramble: formatSequence(this.scramble),
+        at: Date.now(),
+      });
+    }
+  }
+}
