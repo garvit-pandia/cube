@@ -95,7 +95,7 @@ export class SceneManager {
 
   onBeforeRender: ((deltaSeconds: number, elapsedSeconds: number) => void) | null = null;
 
-  private container: HTMLElement;
+  readonly container: HTMLElement;
   private resizeObserver: ResizeObserver;
   private clock = new THREE.Clock();
   private backdrop: THREE.Mesh | null = null;
@@ -169,6 +169,7 @@ export class SceneManager {
     canvas.style.width = '100%';
     canvas.style.height = '100%';
     canvas.style.touchAction = 'none';
+    canvas.style.cursor = 'grab';
     container.appendChild(canvas);
 
     this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);

@@ -89,6 +89,7 @@ export class CubeRenderer {
         mesh.receiveShadow = true;
         mesh.castShadow = false;
         mesh.userData.cubeletId = cubelet.id;
+        mesh.userData.stickerIndex = index;
         mesh.name = `sticker-${cubelet.id}-${index}`;
         group.add(mesh);
       }
