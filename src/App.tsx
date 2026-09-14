@@ -17,6 +17,7 @@ import { FACE_NAMES } from './cube/palette';
 import { formatSequence } from './cube/scramble';
 import type { FaceLetter } from './cube/types';
 import { FACE_LETTERS } from './cube/types';
+import { PointerTurnHandler } from './render/PointerTurnHandler';
 import { SceneManager } from './render/SceneManager';
 import { formatTime } from './session/SolveSession';
 
@@ -69,6 +70,13 @@ export default function App() {
     const unsubscribe = controller.subscribe(setSnapshot);
     setSnapshot(controller.snapshot());
 
+    // Sticker drags become face turns; background and centre drags stay orbit.
+    const pointerTurn = new PointerTurnHandler(scene, {
+      stickerInfo: (cubeletId, stickerIndex) => controller.stickerInfo(cubeletId, stickerIndex),
+      canStart: () => controller.canDrag(),
+      onMove: (move) => controller.enqueue(move),
+    });
+
     sceneRef.current = scene;
     controllerRef.current = controller;
 
@@ -94,6 +102,7 @@ export default function App() {
       cancelAnimationFrame(firstFrame);
       cancelAnimationFrame(secondFrame);
       setSceneReady(false);
+      pointerTurn.dispose();
       unsubscribe();
       scene.dispose();
       controller.renderer.dispose();
@@ -265,7 +274,7 @@ export default function App() {
           aria-label={cubeDescription}
         />
         <div className="stage-hint" aria-hidden="true">
-          Drag to orbit &middot; scroll to zoom
+          Drag a sticker to turn &middot; drag around it to orbit &middot; scroll to zoom
         </div>
         {!sceneReady && (
           <div className="stage-loading" role="status">
@@ -344,7 +353,7 @@ export default function App() {
           <button
             type="button"
             className="btn"
-            onClick={() => controller?.scrambleCube()}
+            onClick={() => void controller?.scrambleOptimally()}
             disabled={solving}
           >
             Scramble
@@ -355,7 +364,15 @@ export default function App() {
             onClick={() => (solving ? controller?.cancelSolve() : controller?.solve())}
             disabled={!solving && !snapshot?.canSolve}
           >
-            {solving ? 'Cancel' : 'Solve'}
+            {solving ? 'Cancel' : 'Replay'}
+          </button>
+          <button
+            type="button"
+            className={`btn ${solving ? 'btn-danger' : 'btn-solve'}`}
+            onClick={() => (solving ? undefined : controller?.solveOptimally())}
+            disabled={!solving && !snapshot?.canSolveOptimally}
+          >
+            Optimal (~20)
           </button>
           <button
             type="button"

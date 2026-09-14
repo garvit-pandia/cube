@@ -1,8 +1,10 @@
 import { CubeState } from '../cube/CubeState';
+import { stickerWorldNormal } from '../cube/dragTurn';
+import { isSolverError, solutionToMoves, toFacelets } from '../cube/facelets';
 import { invertMove, invertMoves, simplifyMoves } from '../cube/notation';
 import { FACE_AXES } from '../cube/palette';
 import { generateScramble, formatSequence } from '../cube/scramble';
-import type { Move } from '../cube/types';
+import type { Move, Vec3 } from '../cube/types';
 import type { SceneManager } from '../render/SceneManager';
 import { CubeRenderer } from '../render/CubeRenderer';
 import { SolveSession, type SolveStats, type StorageLike } from '../session/SolveSession';
@@ -61,6 +63,43 @@ export interface CubeSnapshot {
   readonly solveDone: number;
   /** True when `solve()` has work to do. */
   readonly canSolve: boolean;
+  /** True when `solveOptimally()` would have something to do. */
+  readonly canSolveOptimally: boolean;
+}
+
+type SolverApi = {
+  readonly solve: (facelets: string) => string;
+  readonly randomCube: () => string;
+  readonly initFull: () => void;
+};
+
+let solverPromise: Promise<SolverApi | null> | null = null;
+
+/** Lazy-load the vendored two-phase solver; warms tables in the background. */
+function loadSolver(): Promise<SolverApi | null> {
+  if (!solverPromise) {
+    solverPromise = import('../cube/min2phase.js')
+      .then((module): SolverApi => {
+        const api = (module.default ?? module) as SolverApi;
+        try {
+          api.initFull();
+        } catch {
+          // Partial init still solves; first call just takes ~200ms.
+        }
+        return api;
+      })
+      .catch(() => null);
+  }
+  return solverPromise;
+}
+
+// Warm the solver on module load so it is ready by the time the user asks.
+if (typeof window !== 'undefined') {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => void loadSolver());
+  } else {
+    setTimeout(() => void loadSolver(), 1500);
+  }
 }
 
 type Listener = (snapshot: CubeSnapshot) => void;
@@ -167,6 +206,7 @@ export class CubeController {
       solveTotal: this.solveTotal,
       solveDone: this.solveDone,
       canSolve: this.canSolve(),
+      canSolveOptimally: !this.solving && !this.isBusy() && !this.state.isSolved(),
     };
   }
 
@@ -256,6 +296,76 @@ export class CubeController {
   }
 
   /**
+   * Solve the current cube state optimally using the two-phase algorithm.
+   * Unlike `solve()`, this works from any state (not just logged turns) and
+   * produces a near-optimal solution (≤21 moves). Falls back to replay solve
+   * if the solver is unavailable or rejects the state.
+   */
+  async solveOptimally(): Promise<Move[] | null> {
+    if (this.solving || this.isBusy() || this.state.isSolved()) return null;
+
+    const api = await loadSolver();
+    if (!api) {
+      // Solver failed to load; fall back to log-inversion.
+      return this.solve();
+    }
+    // The solver loads async; the cube may have changed while we waited.
+    if (this.solving || this.isBusy() || this.state.isSolved()) return null;
+
+    const facelets = toFacelets(this.state);
+    const solution = api.solve(facelets);
+    if (isSolverError(solution)) {
+      // Invalid state projection or unsolvable; fall back.
+      return this.solve();
+    }
+
+    const moves = simplifyMoves(solutionToMoves(solution));
+    if (moves.length === 0) return null;
+
+    this.redoStack = [];
+    this.queue = moves.map((move): QueuedMove => ({ move, record: false, solve: true }));
+    this.phaseBeforeSolve = this.phase;
+    if (this.phase === 'running') this.elapsedMs = this.elapsed;
+    this.solving = true;
+    this.solveTotal = moves.length;
+    this.solveDone = 0;
+    this.phase = 'solving';
+    this.justSolved = false;
+    this.autoSolved = false;
+    this.scheduleNotify();
+    return [...moves];
+  }
+
+  /**
+   * Generate a true random-state scramble using the solver's scrambler.
+   * Falls back to axis-alternation if the solver is unavailable.
+   */
+  async scrambleOptimally(length = 22): Promise<Move[]> {
+    if (this.solving || this.isBusy()) return [...this.scramble];
+    const api = await loadSolver();
+    if (this.solving || this.isBusy()) return [...this.scramble];
+    if (api) {
+      const facelets = api.randomCube();
+      // Convert to Singmaster by solving from the random state.
+      const solution = api.solve(facelets);
+      if (!isSolverError(solution)) {
+        const scramble = simplifyMoves(invertMoves(solutionToMoves(solution)));
+        this.redoStack = [];
+        for (const move of scramble) this.queue.push({ move, record: false });
+        this.scramble = scramble;
+        this.phase = 'ready';
+        this.elapsedMs = 0;
+        this.justSolved = false;
+        this.autoSolved = false;
+        this.scheduleNotify();
+        return [...scramble];
+      }
+    }
+    // Fallback
+    return this.scrambleCube(length);
+  }
+
+  /**
    * Scramble the cube. Scramble turns are played through the same queue as
    * user turns so the whole thing animates, but they are not recorded in the
    * move history — the history is the solver's moves, matching a timed solve.
@@ -301,6 +411,29 @@ export class CubeController {
 
   isBusy(): boolean {
     return this.active !== null || this.queue.length > 0;
+  }
+
+  /**
+   * True when a drag gesture may start: the queue must be fully drained so
+   * the sticker facts the gesture reads from `state` are the ones it turns.
+   */
+  canDrag(): boolean {
+    return !this.solving && !this.isBusy();
+  }
+
+  /**
+   * State-derived facts for a sticker mesh hit by a raycast. The world normal
+   * is the cubie-local normal carried by the cubelet's integer rotation, so
+   * input resolution reads the model, never the meshes.
+   */
+  stickerInfo(cubeletId: number, stickerIndex: number): { normal: Vec3; position: Vec3 } | null {
+    const cubie = this.state.byId(cubeletId);
+    const sticker = cubie?.stickers[stickerIndex];
+    if (!cubie || !sticker) return null;
+    return {
+      normal: stickerWorldNormal(cubie.rotation, sticker.normal),
+      position: cubie.position,
+    };
   }
 
   /** True when `solve()` would have something to do. */
