@@ -9,18 +9,7 @@ import {
   saveSidebarOpen,
   type Settings,
 } from './settings';
-import type { StorageLike } from '../session/SolveSession';
-
-function fakeStorage(initial: Record<string, string> = {}) {
-  const data: Record<string, string> = { ...initial };
-  const storage: StorageLike = {
-    getItem: (key) => (key in data ? data[key] : null),
-    setItem: (key, value) => {
-      data[key] = value;
-    },
-  };
-  return { storage, data };
-}
+import { fakeStorage } from '../test/support';
 
 describe('settings', () => {
   it('falls back to defaults when storage is missing', () => {

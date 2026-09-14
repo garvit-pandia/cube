@@ -1,17 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { SolveSession, formatTime, type SolveRecord, type StorageLike } from './SolveSession';
-
-function fakeStorage(initial: Record<string, string> = {}) {
-  const data: Record<string, string> = { ...initial };
-  const storage: StorageLike = {
-    getItem: (key) => (key in data ? data[key] : null),
-    setItem: (key, value) => {
-      data[key] = value;
-    },
-  };
-  return { storage, data };
-}
+import { SolveSession, formatTime, type SolveRecord } from './SolveSession';
+import { fakeStorage } from '../test/support';
 
 function record(timeMs: number, moves = 30, at = 0): SolveRecord {
   return { timeMs, moves, scramble: 'R U', at };

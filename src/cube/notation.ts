@@ -42,23 +42,6 @@ export function invertMoves(moves: readonly Move[]): Move[] {
   return moves.map(invertMove).reverse();
 }
 
-/** The layer axis a move turns about, plus its visual quarter count (-1, 1, or 2). */
-export function visualTurn(move: Move): { quarters: 1 | 2 | -1; clockWise: 1 | -1 } {
-  const quarters: 1 | 2 | -1 = move.turns === 1 ? 1 : move.turns === 2 ? 2 : -1;
-  return { quarters, clockWise: -1 };
-}
-
-/**
- * Two moves on the same face collapse into one. Returns null when they cancel
- * or combine into a single move, otherwise the replacement.
- */
-export function combineMoves(first: Move, second: Move): Move | null {
-  if (first.face !== second.face) return null;
-  const total = (first.turns + second.turns) % 4;
-  if (total === 0) return null;
-  return { face: first.face, turns: total as 1 | 2 | 3 };
-}
-
 /**
  * Fold adjacent turns on the same face: `R R` -> `R2`, `R2 R` -> `R'`, and
  * pairs that cancel (`R R'`) disappear entirely. Turns on different faces keep
