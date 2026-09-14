@@ -4,7 +4,7 @@ Handbook for AI/human contributors to **cube3**: a browser 3×3 Rubik's Cube sim
 
 Core property: **the integer logical state is the only source of truth.** Meshes mirror it and are never read back. Turns play through an animation queue for looks; the model decides truth.
 
-- No backend, database, `.env`, or CI. Static bundle in `dist/`.
+- No backend, database, or `.env`. Static bundle in `dist/`; GitHub Pages deploy via workflow.
 - Dev server pinned to **port 5179** (`strictPort`, see `../PORT-REGISTRY.md`).
 
 ## Architecture & Data Flow
@@ -43,6 +43,8 @@ One turn: `App.playMove` → `CubeController.enqueue()` (queues `{move, record:t
 14. **The turn log drives auto-solve** (`CubeController.applied`). Every turn that lands in `state` — user, undo inverse, scramble, or solve — is appended in `update()`. `solve()` plays `simplifyMoves(invertMoves(applied + in-flight))`, which is correct from any session state; skip the push and every later solution is silently wrong. Cleared on `reset()` and whenever the cube reaches solved.
 15. **Auto-solve is not a solve** (`solve`/`cancelSolve`). Solve turns are `record: false, solve: true`: no `history`, no session record, clock frozen (phase `solving`), `canUndo` false, input guarded at the controller and disabled in the UI. Cancel drops remaining solve turns, restores the prior phase, and re-bases `startedAt` when resuming a running attempt. `autoSolved` is one-shot and drives the separate screen-reader announcement.
 16. **`solve()` snapshots the log synchronously.** It captures `applied` + the in-flight turn and replaces the queue in one turn; yielding in between would let an unaccounted turn land and break the inversion.
+17. **Drag-to-turn resolves through the model, then the queue** (`src/cube/dragTurn.ts`, `src/render/PointerTurnHandler.ts`). A gesture reads the sticker's world normal and cubelet position from `CubeState` (integer math via `stickerInfo`), never from meshes; the resolved move enters through `enqueue()` like any button press. The handler intercepts pointerdown in the container's capture phase (so OrbitControls never sees the gesture) and never toggles `controls.enabled`. Drags only start when `canDrag()` is true (queue drained), so the facts the gesture read are the facts it turns.
+18. **`src/cube/min2phase.js` is vendored third-party code** (cs0x7f/min2phase.js, MIT; loaded lazily by `CubeController.loadSolver`). Do not reformat, lint, or refactor it; the only local change is the ESM export shim at the bottom, and it is excluded from oxlint via `ignorePatterns`.
 
 ## Development Commands
 
@@ -51,6 +53,7 @@ One turn: `App.playMove` → `CubeController.enqueue()` (queues `{move, record:t
 | `npm run dev` | Vite on `http://localhost:5179/`, `strictPort` — fails fast on collision, never drifts |
 | `npm run test` | `vitest run` — single pass, no watch |
 | `npx vitest run <file>` | Focused suite, e.g. `npx vitest run src/cube/CubeState.test.ts` (`npx vitest` alone = watch) |
+| `npm run test:e2e` | Playwright browser tests (`e2e/*.e2e.ts`) against the dev server; reuses a running one |
 | `npm run build` | `tsc -b && vite build` → `dist/` (the >500 kB chunk warning is expected — three.js) |
 | `npm run lint` | `oxlint` (cwd, no path arg) |
 | `npm run preview` | Serve built `dist/` |
@@ -82,17 +85,19 @@ Stale-module check (WSL2 polling hazard, below): `curl -s http://localhost:5179/
 ## Testing & QA
 
 - Vitest 5, **no vitest config** — defaults (`environment: 'node'`, `globals: false`), so every suite imports `{ describe, expect, it } from 'vitest'` explicitly.
-- **106 tests, 5 colocated suites** (`<Module>.test.ts`), all pure logic — no DOM/WebGL/three.js. Currently green with build + lint.
+- **130 tests, 7 colocated unit suites** (`<Module>.test.ts`), all pure logic — no DOM/WebGL/three.js. Plus 10 Playwright e2e tests in `e2e/*.e2e.ts` that drive the real browser through the `__cube3` seam. All green with build + lint.
 
 | Suite | Pins |
 |---|---|
 | `src/cube/CubeState.test.ts` (52) | 27 cubelets / 54 stickers; `it.each` face-identity sequences; inverse round-trips; 5000-turn drift invariants; layer selection; Singmaster direction table |
 | `src/session/SolveSession.test.ts` (16) | trimmed Ao5/Ao12, recent-first, persistence round-trip, corrupt-JSON + per-entry validation, 200-record cap, `formatTime` |
 | `src/app/settings.test.ts` (16) | settings defaults/round-trip/corrupt payload/per-field rejection + sidebar-open persistence (corrupt → open, null storage safe) |
+| `src/cube/dragTurn.test.ts` (15) | drag→move resolution table; slice/centre/degenerate rejections; 192-combination check that every resolved turn initially moves the sticker along the drag, against `CubeState` conventions |
+| `src/cube/facelets.test.ts` (9) | solved cube → canonical URFDLB string; 9-per-face histogram; solver round-trips on seeded scrambles (≤21 moves); `solutionToMoves` padding + malformed rejection |
 | `src/cube/notation.test.ts` (12) | `simplifyMoves` cancellation/combination invariants + seeded `invertMoves`→`simplifyMoves` round-trip against `CubeState` (the auto-solve math) |
 | `src/cube/scramble.test.ts` (10) | axis alternation, no back-to-back face/cancellation, full face coverage, seeded reproducibility, parse/format round-trip |
 
-- New tests: colocate, import vitest explicitly, use seeded `mulberry32(seed)` (not `Math.random`), inject fakes (`StorageLike`, `() => number`). Reuse `expectLegalCube` / `expectIntegralRigidBody` / `independentSolvedCheck` from `CubeState.test.ts`.
-- `mulberry32` now exists in three suites (`CubeState`, `scramble`, `notation`) and `fakeStorage` in two — a fourth copy needs consolidation into a shared helper instead.
-- **Gaps (intentional):** no tests for `CubeController` (including the solve state machine), `src/render/`, palettes/types, `App`/`main`. Rendering and interaction are verified in a real browser via the `window.__cube3` seam — do not add jsdom to test it.
-- **Known dead code:** `visualTurn` and `combineMoves` (`notation.ts`) are exported but unreferenced; `public/icons.svg` is an unreferenced ~5 KB sprite copied into every build. Leave alone unless removing deliberately.
+E2E (`e2e/`, Playwright, chromium): optimal solve from scramble ends solved ≤21; replay solve from manual moves ends solved; auto-solve never records; cancel restores prior phase; blocked solver chunk falls back to replay; sticker drags commit valid moves; background/slice drags do not; drags are dropped while the queue is busy. The suite sets `controller.animationScale = 0.001` because headless software rendering plus the delta clamp makes real easing crawl.
+
+- New tests: colocate, import vitest explicitly, use seeded `mulberry32(seed)` from `src/test/support.ts` (not `Math.random`), inject fakes (`fakeStorage`, `() => number`). Reuse `expectLegalCube` / `expectIntegralRigidBody` / `independentSolvedCheck` from `CubeState.test.ts`.
+- **Gaps (intentional):** no unit tests for `CubeController` (its solve state machine is covered end-to-end by Playwright), `src/render/` internals, palettes/types, `App`/`main`. Rendering and interaction are verified in a real browser via the `window.__cube3` seam — do not add jsdom to test it.
