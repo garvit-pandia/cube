@@ -23,6 +23,14 @@ Drag to orbit, turn with keys or buttons, race the clock.
 
 ---
 
+## Demo
+
+<p align="center">
+  <img src="docs/demo/demo.gif" alt="Scramble, then auto-solve back to solved" width="832" />
+  <br />
+  <sub>Scramble → auto-solve, captured from the dev build · smoother <a href="docs/demo/demo.mp4">MP4 version</a></sub>
+</p>
+
 ## Features
 
 - **Every move, any state** — a full `U U' U2` button panel per face, plus keyboard `U` `D` `L` `R` `F` `B` (hold `Shift` to reverse, press twice for a half turn).
