@@ -43,7 +43,9 @@ function multiply(a: Mat3, b: Mat3): Mat3 {
   return out as unknown as Mat3;
 }
 
-function applyMatrix(m: Mat3, v: Vec3): Vec3 {
+/** Row-major 3x3 matrix times vector. Accepts any 9-number array (Mat3 or a
+ * live rotation read from state), so all consumers share one implementation. */
+export function applyMatrix(m: readonly number[], v: Vec3): Vec3 {
   return [
     m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
     m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
