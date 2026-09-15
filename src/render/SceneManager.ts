@@ -162,7 +162,7 @@ export class SceneManager {
     // kernel), so PCF is the type that can actually produce a soft penumbra here.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.98;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const canvas = this.renderer.domElement;
@@ -232,7 +232,7 @@ export class SceneManager {
     const room = new RoomEnvironment();
     this.environment = this.pmrem.fromScene(room, 0.04).texture;
     this.scene.environment = this.environment;
-    this.scene.environmentIntensity = 0.5;
+    this.scene.environmentIntensity = 0.7;
     room.dispose?.();
   }
 

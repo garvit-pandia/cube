@@ -19,13 +19,14 @@ export const STICKER_OFFSET =
 
 export const BODY_MATERIAL = {
   color: BODY_COLOR,
-  roughness: 0.42,
+  roughness: 0.55,
   metalness: 0,
 } as const;
 
 export const STICKER_MATERIAL = {
-  roughness: 0.22,
+  roughness: 0.24,
   metalness: 0,
-  clearcoat: 0.85,
-  clearcoatRoughness: 0.14,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.08,
+  envMapIntensity: 1.15,
 } as const;
