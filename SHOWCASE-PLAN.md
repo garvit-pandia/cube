@@ -352,6 +352,10 @@ A/B says so). Procedure — do not skip the A/B:
    `scene.resetView(reducedMotion)` after ready and skip (this is just to
    normalize screenshots). Screenshot with Playwright at 1440×900
    (deviceScaleFactor 2) before changing anything → save as "before".
+   Capture **two camera stations and one motion frame** per candidate — the
+   default 3/4 view, an elevated near-top-down view (clearcoat/env blowouts
+   show from above first), and one frame mid-turn (moving speculars across
+   the faces). Judge on all three, not the idle view alone.
 2. Apply candidate set A: stickers `clearcoat: 1.0`,
    `clearcoatRoughness: 0.08`, `roughness: 0.24`; body `roughness: 0.55`;
    `scene.environmentIntensity 0.5 → 0.7`. Screenshot → "A".
@@ -397,10 +401,13 @@ private unregisterFrame: (() => void) | null = null;
   `immediate` also snaps current (used for reduced motion / instant speed).
 - `beginIntro(duration = 1.2)` — for each slot compute
   `dir = basePosition.clone().normalize()` (zero-length → skip intro for the
-  centre cubie), scatter distance `2.5 + rand*1.5` along `dir`, random scatter
+  centre cubie), scatter distance `2.5 + rand*0.8` along `dir`, random scatter
   quaternion, `delay = 0.15 * (1 - dir.y) + rand*0.1` (top layer lands last
   reads nicely — any deterministic-but-varied stagger is acceptable). Store
-  per-slot; register the frame hook if not registered.
+  per-slot; register the frame hook if not registered. **Scatter stays
+  ≤ ~3.3 units from centre on purpose** — the key-light shadow frustum is
+  ±3.4 orthographic; scattering farther makes cubelets pop in/out of shadow
+  casting mid-intro.
 - Frame hook (registered in `build()`, unregistered in `clear()` and
   `dispose()`; guard `unregisterFrame` double-call): advance explode toward
   target (`k += (target - k) * min(1, delta*6)` — exponential approach, snap
@@ -437,10 +444,13 @@ private unregisterFrame: (() => void) | null = null;
 - No interaction gating: turns during explode/intro are safe (offsets compose);
   `canDrag` already guards queue-busy drags.
 
-**Create `e2e/explode.e2e.ts`** (follow existing e2e style in `e2e/`):
-set `animationScale = 0.001`, click the Exploded button, play 3 moves via
-`__cube3.controller.enqueue`, assert `controller.state.isSolved()` still
-behaves and no console errors; screenshot to `/tmp/opencode/cube3-design/`.
+**Create `e2e/explode.e2e.ts`** (follow existing e2e style in `e2e/`): set
+`animationScale = 0.001`, toggle the Exploded button **on**, play 3 moves via
+`__cube3.controller.enqueue`, toggle it **off**, then run
+`controller.solveOptimally()` and assert `controller.state.isSolved()` — that
+is the actual no-drift property this milestone protects; `isSolved()` "still
+behaving" after 3 moves would pass even with broken offsets. Also assert no
+console errors; screenshot the exploded state to `/tmp/opencode/cube3-design/`.
 
 **Acceptance:**
 - [ ] Explode toggle tweens out and back; scramble/solve/undo visibly work
@@ -494,7 +504,10 @@ export class CelebrationRig {
 - Upgrade the stamp markup: `.solved-flash` currently renders the text
   `Solved`. Change it to `Solved · {time}` where time comes from
   `stats?.latest ? formatTime(stats.latest.timeMs) : ''` (fallback: just
-  `Solved`). Keep `aria-hidden="true"` as-is (the separate sr-only
+  `Solved`) — **but only when `!autoSolved`**. `stats.latest` is the last
+  *recorded* (manual) solve and persists across auto-solves; showing it next
+  to an auto-solve would quote a stale personal best. Auto-solve stamp is
+  plain `Solved`. Keep `aria-hidden="true"` as-is (the separate sr-only
   announcement is the accessible channel). Sound: call the M2 `chime()` here.
 
 **Modify `src/index.css`:** restyle `.solved-flash` into the stamp: big
@@ -610,6 +623,9 @@ export class DemoLoop {
   `celebrateMs` (the App's own `justSolved` trigger handles visuals/sound —
   DemoLoop does not know about them) → `resting` for `restMs` → loop to
   `scrambling`. Every state change fires `onTransition` **after** assignment.
+  **Both fired promises are guarded**: a rejection from `scrambleOptimally()`
+  (solver chunk blocked) ends the loop at `'off'` exactly like a
+  `solveOptimally()` rejection — no unhandled rejection, no throw.
 - `stop()`: if `solving`/`scrambling` and a solve is in flight →
   `controller.cancelSolve()` (it already restores the prior phase —
   invariant #15); clear every pending timer; state `'off'`.
@@ -628,6 +644,8 @@ fixture and immediately-resolving promises):
 - [ ] `start()` while running is a no-op
 - [ ] a controller whose `solveOptimally` rejects (solver failure) ends the
       loop at `'off'` without throwing
+- [ ] a controller whose `scrambleOptimally` rejects ends the loop at `'off'`
+      without throwing (same guarantee as the solve path)
 
 **Modify `src/App.tsx`:**
 
@@ -637,7 +655,14 @@ fixture and immediately-resolving promises):
   `setActive(false)`.
 - User-gesture guard: while `demoOn`, a `pointerdown` on the stage element or
   any move keypress (the existing keydown handler) stops the loop. Add
-  listeners when demo starts, remove when it stops.
+  listeners when demo starts, remove when it stops. **The on-screen move pads
+  stop it too** (route their clicks through the same stop — keyboard and
+  pointer inputs must behave identically). Remember the capture-phase gotcha:
+  the stage listener must be capture-phase or sticker clicks never reach it.
+- Sound across cycles: M2's whoosh fires on scramble `0 → >0`, so demo
+  cycles 2+ would be silent until the chime. In App, retrigger the whoosh
+  when the **scramble sequence content changes** (compare the formatted
+  sequence, not the length) — do this here, not by reopening M2.
 - `hero-meta` shows `Demo` on the left while active (keep the phase label
   semantics; the right slot keeps its current content).
 - `?demo=1`: at mount, if `new URLSearchParams(location.search).get('demo')
@@ -655,9 +680,19 @@ fixture and immediately-resolving promises):
 - [ ] History/session unchanged after demo (solve a manual scramble after
       demo; times record as before — demo polluted nothing)
 - [ ] Stop mid-solve restores prior phase (existing cancel behavior)
-- [ ] Any action button stops the demo; stage tap stops it
+- [ ] Any action button stops the demo; stage tap stops it; move-pad clicks
+      stop it
 - [ ] `?demo=1` autostarts; unit suite green with the new cases; full
       verification green
+
+**Create `e2e/demo.e2e.ts`** (the centerpiece needs browser coverage, unit
+tests alone are not enough): set `animationScale = 0.001`; load with
+`?demo=1`; assert the loop autostarts and the phase visibly progresses
+scrambling → solving → (celebrating/resting) → scrambling again within a
+generous timeout; assert `controls.enabled === false` while demo is on
+(cinema owns the camera — M6 integration); then dispatch a stage
+`pointerdown` and assert the demo stops, `controls.enabled` is restored, and
+the phase returns to a non-solving state. No console errors throughout.
 
 **Commit:** `feat(app): self-solving demo loop`
 
@@ -691,7 +726,12 @@ export class CaptureManager {
 
 - "Record" button in the **Device** group (before "Reset view"), label toggles
   `Record` / `Stop` (exact strings), `aria-pressed` while recording; hidden
-  entirely when `CaptureManager.supported()` is false.
+  entirely when `CaptureManager.supported()` is false. **The Record click is a
+  user gesture — call `soundRef.current?.unlock()` in its handler first**, so
+  the muxed audio track exists even if the user never interacted with the page
+  before recording. Note the limitation in code: toggling the sound setting
+  *mid-recording* cannot join the live `MediaStream` — the track set is fixed
+  at start; that is acceptable.
 - While recording, `.hero-meta` gains a red pulsing dot + `REC` label (CSS
   reuse of `.hero-run` pattern with `--danger` color).
 - `onSaved`: create an object URL, synthesize
