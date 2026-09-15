@@ -699,22 +699,26 @@ kbd {
   place-items: center;
   z-index: 2;
   pointer-events: none;
-  font-size: clamp(1.6rem, 5vw, 2.6rem);
-  font-weight: 700;
-  letter-spacing: 0.18em;
+  font-size: clamp(2rem, 6vw, 3.2rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
-  animation: solved-fade 1.1s ease-out 1 forwards;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.55);
+  animation: solved-stamp 1.6s cubic-bezier(0.2, 0.9, 0.25, 1) 1 forwards;
 }
 
-@keyframes solved-fade {
+@keyframes solved-stamp {
   0% {
     opacity: 0;
     transform: scale(0.94);
+    letter-spacing: 0.22em;
   }
-  18% {
+  14% {
     opacity: 1;
     transform: scale(1);
+    letter-spacing: 0.12em;
   }
   70% {
     opacity: 1;

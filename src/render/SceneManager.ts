@@ -9,7 +9,7 @@ const FLOOR_Y = -1.88;
  * the viewport consistently and is never clipped at narrow aspects. The centre
  * sits slightly below the origin to leave room for the contact shadow.
  */
-const CONTENT_CENTER = new THREE.Vector3(0, -0.2, 0);
+export const CONTENT_CENTER = new THREE.Vector3(0, -0.2, 0);
 const CONTENT_RADIUS = 2.62;
 const VIEW_DIRECTION = new THREE.Vector3(3.7, 3.6, 5.05).normalize();
 

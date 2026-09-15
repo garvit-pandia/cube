@@ -18,6 +18,7 @@ import { FACE_NAMES } from './cube/palette';
 import { formatSequence } from './cube/scramble';
 import type { MoveFace } from './cube/types';
 import { FACE_LETTERS, MOVE_FACES, SLICE_LETTERS } from './cube/types';
+import { CelebrationRig } from './render/CelebrationRig';
 import { PointerTurnHandler } from './render/PointerTurnHandler';
 import { SceneManager } from './render/SceneManager';
 import { SoundRig } from './render/SoundRig';
@@ -87,6 +88,7 @@ export default function App() {
   const controllerRef = useRef<CubeController | null>(null);
   const sceneRef = useRef<SceneManager | null>(null);
   const soundRef = useRef<SoundRig | null>(null);
+  const celebrationRef = useRef<CelebrationRig | null>(null);
   const historyRef = useRef<HTMLOListElement>(null);
   const logTabsRef = useRef<HTMLDivElement>(null);
   const solvingRef = useRef(false);
@@ -133,6 +135,11 @@ export default function App() {
     const unlockSound = () => sound.unlock();
     window.addEventListener('pointerdown', unlockSound, { once: true, capture: true });
 
+    // Solve burst: one rig per mount, triggered from the justSolved branch;
+    // it registers its frame hook only while a burst is live.
+    const celebration = new CelebrationRig(scene.scene, controller.renderer, scene);
+    celebrationRef.current = celebration;
+
     // Sticker drags become face or slice turns; background drags stay orbit.
     const pointerTurn = new PointerTurnHandler(scene, {
       stickerInfo: (cubeletId, stickerIndex) => controller.stickerInfo(cubeletId, stickerIndex),
@@ -168,11 +175,14 @@ export default function App() {
       window.removeEventListener('pointerdown', unlockSound, true);
       sound.dispose();
       soundRef.current = null;
+      celebration.dispose();
+      celebrationRef.current = null;
       pointerTurn.dispose();
       unsubscribe();
       controller.renderer.setFrameSource(null);
       scene.dispose();
       controller.renderer.dispose();
+      sceneRef.current = null;
       controllerRef.current = null;
     };
   }, []);
@@ -283,8 +293,10 @@ export default function App() {
   }, [snapshot]);
 
   useEffect(() => {
-    if (justSolved) soundRef.current?.chime();
-  }, [justSolved]);
+    if (!justSolved) return;
+    soundRef.current?.chime();
+    if (!reducedMotion) celebrationRef.current?.trigger();
+  }, [justSolved, reducedMotion]);
 
   // Roving focus for the log tab row: arrows move both selection and focus,
   // per the ARIA tabs pattern.
@@ -425,7 +437,9 @@ export default function App() {
         )}
         {justSolved && (
           <div className="solved-flash" aria-hidden="true">
-            Solved
+            {!autoSolved && stats?.latest
+              ? `Solved · ${formatTime(stats.latest.timeMs)}`
+              : 'Solved'}
           </div>
         )}
       </main>
