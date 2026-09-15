@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 import { CubeController, type CubeSnapshot } from './app/CubeController';
 import {
@@ -69,6 +70,11 @@ const PHASE_LABEL: Record<CubeSnapshot['phase'], string> = {
   done: 'Solved',
 };
 
+/** Which session-log tab is open. */
+type LogTab = 'scramble' | 'history' | 'solves';
+
+const LOG_TAB_ORDER: readonly LogTab[] = ['scramble', 'history', 'solves'];
+
 const SPEED_OPTIONS = [
   { value: 'normal', label: 'Normal' },
   { value: 'fast', label: 'Fast' },
@@ -80,6 +86,7 @@ export default function App() {
   const controllerRef = useRef<CubeController | null>(null);
   const sceneRef = useRef<SceneManager | null>(null);
   const historyRef = useRef<HTMLOListElement>(null);
+  const logTabsRef = useRef<HTMLDivElement>(null);
   const solvingRef = useRef(false);
   const [snapshot, setSnapshot] = useState<CubeSnapshot | null>(null);
   const [settings, setSettings] = useState<Settings>(() =>
@@ -91,6 +98,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     loadSidebarOpen(typeof window === 'undefined' ? null : safeStorage()),
   );
+  const [logTab, setLogTab] = useState<LogTab>('scramble');
 
   useEffect(() => {
     const container = containerRef.current;
@@ -220,6 +228,36 @@ export default function App() {
     solvingRef.current = solving;
   }, [solving]);
 
+  // Roving focus for the log tab row: arrows move both selection and focus,
+  // per the ARIA tabs pattern.
+  const onLogTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const current = LOG_TAB_ORDER.indexOf(logTab);
+    let next: number;
+    switch (event.key) {
+      case 'ArrowRight':
+        next = (current + 1) % LOG_TAB_ORDER.length;
+        break;
+      case 'ArrowLeft':
+        next = (current - 1 + LOG_TAB_ORDER.length) % LOG_TAB_ORDER.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = LOG_TAB_ORDER.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setLogTab(LOG_TAB_ORDER[next]);
+    requestAnimationFrame(() => {
+      logTabsRef.current
+        ?.querySelector<HTMLButtonElement>(`#tab-${LOG_TAB_ORDER[next]}`)
+        ?.focus();
+    });
+  };
+
   const cubeDescription = solved
     ? 'Solved 3 by 3 Rubik\u2019s cube, every face showing one colour.'
     : `Mixed 3 by 3 Rubik\u2019s cube with ${historyLength} ${
@@ -336,17 +374,22 @@ export default function App() {
       </p>
 
       <section className="panel" id="controls-panel" aria-label="Cube controls">
-        <div className="timer-bar">
-          <div className="timer">
-            <span
-              className={`timer-value is-${phase}`}
-              role="timer"
-              aria-label={`Elapsed time ${formatTime(elapsed)}`}
-            >
-              {formatTime(elapsed)}
-            </span>
-            <span className="timer-label">{PHASE_LABEL[phase]}</span>
+        <div className="hero-timer">
+          <div className="hero-meta">
+            <span>{PHASE_LABEL[phase]}</span>
+            {phase === 'running' && (
+              <span className="hero-run" aria-hidden="true">
+                Running
+              </span>
+            )}
           </div>
+          <span
+            className={`hero-time${phase === 'running' || phase === 'solving' ? ' is-active' : ''}`}
+            role="timer"
+            aria-label={`Elapsed time ${formatTime(elapsed)}`}
+          >
+            {formatTime(elapsed)}
+          </span>
           {solving && (
             <div className="solve-progress" role="status" aria-live="polite">
               <span className="solve-label">
@@ -364,102 +407,161 @@ export default function App() {
               </span>
             </div>
           )}
-          <dl className="stats">
-            <div>
-              <dt>Best</dt>
-              <dd>{stats?.best ? formatTime(stats.best.timeMs) : '\u2014'}</dd>
-            </div>
-            <div>
-              <dt>Ao5</dt>
-              <dd>{stats?.averageOf5 != null ? formatTime(stats.averageOf5) : '\u2014'}</dd>
-            </div>
-            <div>
-              <dt>Ao12</dt>
-              <dd>{stats?.averageOf12 != null ? formatTime(stats.averageOf12) : '\u2014'}</dd>
-            </div>
-            <div>
-              <dt>Solves</dt>
-              <dd>{stats?.count ?? 0}</dd>
-            </div>
-          </dl>
         </div>
 
-        <div className="panel-row">
+        <dl className="stats">
+          <div>
+            <dt>Best</dt>
+            <dd>{stats?.best ? formatTime(stats.best.timeMs) : '\u2014'}</dd>
+          </div>
+          <div>
+            <dt>Ao5</dt>
+            <dd>{stats?.averageOf5 != null ? formatTime(stats.averageOf5) : '\u2014'}</dd>
+          </div>
+          <div>
+            <dt>Ao12</dt>
+            <dd>{stats?.averageOf12 != null ? formatTime(stats.averageOf12) : '\u2014'}</dd>
+          </div>
+          <div>
+            <dt>Solves</dt>
+            <dd>{stats?.count ?? 0}</dd>
+          </div>
+        </dl>
+
+        <div className="action-groups">
+          <div className="action-group">
+            <p className="action-group-label">Session</p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => controller?.solveOptimally()}
+              disabled={!snapshot?.canSolveOptimally}
+            >
+              Optimal solve
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void controller?.scrambleOptimally()}
+              disabled={solving}
+            >
+              Scramble
+            </button>
+            <button
+              type="button"
+              className={`btn${solving ? ' btn-danger' : ''}`}
+              onClick={() => (solving ? controller?.cancelSolve() : controller?.solve())}
+              disabled={!solving && !snapshot?.canSolve}
+            >
+              {solving ? 'Cancel' : 'Replay'}
+            </button>
+          </div>
+          <div className="action-group">
+            <p className="action-group-label">Edit</p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => controller?.undo()}
+              disabled={solving || !snapshot?.canUndo}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => controller?.redo()}
+              disabled={solving || !snapshot?.canRedo}
+            >
+              Redo
+            </button>
+          </div>
+          <div className="action-group">
+            <p className="action-group-label">Device</p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => sceneRef.current?.resetView(reducedMotion)}
+            >
+              Reset view
+            </button>
+            <button type="button" className="btn btn-danger" onClick={() => controller?.reset()}>
+              Reset cube
+            </button>
+          </div>
+        </div>
+
+        <div className="panel-section">
+          <div className="panel-section-label" aria-hidden="true">
+            <span>Moves — face</span>
+            <span>Hold Shift to reverse</span>
+          </div>
+          <div className="moves" role="group" aria-label="Face turns">
+            {FACE_LETTERS.map((face) => (
+              <MoveGroup key={face} face={face} disabled={solving} onPlay={playMove} />
+            ))}
+          </div>
+        </div>
+
+        <div className="panel-section">
+          <div className="panel-section-label" aria-hidden="true">
+            <span>Moves — slice</span>
+            <span>M · E · S</span>
+          </div>
+          <div className="moves" role="group" aria-label="Middle-slice turns">
+            {SLICE_LETTERS.map((slice) => (
+              <MoveGroup key={slice} face={slice} disabled={solving} onPlay={playMove} />
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="log-tabs"
+          role="tablist"
+          aria-label="Session log"
+          ref={logTabsRef}
+          onKeyDown={onLogTabKeyDown}
+        >
           <button
             type="button"
-            className="btn"
-            onClick={() => void controller?.scrambleOptimally()}
-            disabled={solving}
+            role="tab"
+            id="tab-scramble"
+            aria-selected={logTab === 'scramble'}
+            aria-controls="panel-scramble"
+            tabIndex={logTab === 'scramble' ? 0 : -1}
+            className={`log-tab${logTab === 'scramble' ? ' is-active' : ''}`}
+            onClick={() => setLogTab('scramble')}
           >
             Scramble
           </button>
           <button
             type="button"
-            className={`btn ${solving ? 'btn-danger' : 'btn-solve'}`}
-            onClick={() => (solving ? controller?.cancelSolve() : controller?.solve())}
-            disabled={!solving && !snapshot?.canSolve}
+            role="tab"
+            id="tab-history"
+            aria-selected={logTab === 'history'}
+            aria-controls="panel-history"
+            tabIndex={logTab === 'history' ? 0 : -1}
+            className={`log-tab${logTab === 'history' ? ' is-active' : ''}`}
+            onClick={() => setLogTab('history')}
           >
-            {solving ? 'Cancel' : 'Replay'}
+            History · {historyLength}
           </button>
           <button
             type="button"
-            className={`btn ${solving ? 'btn-danger' : 'btn-solve'}`}
-            onClick={() => (solving ? undefined : controller?.solveOptimally())}
-            disabled={!solving && !snapshot?.canSolveOptimally}
+            role="tab"
+            id="tab-solves"
+            aria-selected={logTab === 'solves'}
+            aria-controls="panel-solves"
+            tabIndex={logTab === 'solves' ? 0 : -1}
+            className={`log-tab${logTab === 'solves' ? ' is-active' : ''}`}
+            onClick={() => setLogTab('solves')}
           >
-            Optimal (~20)
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => controller?.undo()}
-            disabled={solving || !snapshot?.canUndo}
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => controller?.redo()}
-            disabled={solving || !snapshot?.canRedo}
-          >
-            Redo
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => sceneRef.current?.resetView(reducedMotion)}
-          >
-            Reset view
-          </button>
-          <button type="button" className="btn btn-danger" onClick={() => controller?.reset()}>
-            Reset cube
+            Solves · {stats?.count ?? 0}
           </button>
         </div>
 
-        <div className="moves" role="group" aria-label="Face turns">
-          {FACE_LETTERS.map((face) => (
-            <MoveGroup key={face} face={face} disabled={solving} onPlay={playMove} />
-          ))}
-        </div>
-
-        <div className="moves" role="group" aria-label="Middle-slice turns">
-          {SLICE_LETTERS.map((slice) => (
-            <MoveGroup key={slice} face={slice} disabled={solving} onPlay={playMove} />
-          ))}
-        </div>
-
-        <p className="keyboard-hint">
-          Keyboard: <kbd>U</kbd> <kbd>D</kbd> <kbd>L</kbd> <kbd>R</kbd> <kbd>F</kbd>{' '}
-          <kbd>B</kbd> to turn a face, <kbd>M</kbd> <kbd>E</kbd> <kbd>S</kbd> a middle
-          slice, hold <kbd>Shift</kbd> to reverse. The clock starts on your first turn
-          after a scramble.
-        </p>
-
-        <div className="info">
-          <div className="info-block">
-            <div className="info-head">
-              <h2 id="scramble-heading">Scramble</h2>
+        {logTab === 'scramble' && (
+          <div className="log-panel" role="tabpanel" id="panel-scramble" aria-labelledby="tab-scramble">
+            <div className="log-panel-head">
               <button
                 type="button"
                 className="btn btn-micro"
@@ -471,29 +573,22 @@ export default function App() {
                 Copy
               </button>
             </div>
-            <p
-              className={`sequence ${scramble.length === 0 ? 'is-empty' : ''}`}
-              aria-labelledby="scramble-heading"
-            >
+            <p className={`sequence${scramble.length === 0 ? ' is-empty' : ''}`}>
               {scramble.length > 0 ? formatSequence(scramble) : 'Press Scramble to generate one.'}
             </p>
           </div>
+        )}
 
-          <div className="info-block">
-            <div className="info-head">
-              <h2 id="history-heading">History</h2>
-              <span className="info-count">{history.length}</span>
-            </div>
+        {logTab === 'history' && (
+          <div className="log-panel" role="tabpanel" id="panel-history" aria-labelledby="tab-history">
             {history.length === 0 ? (
-              <p className="sequence is-empty" aria-labelledby="history-heading">
-                No moves yet.
-              </p>
+              <p className="sequence is-empty">No moves yet.</p>
             ) : (
-              <ol className="history" ref={historyRef} aria-labelledby="history-heading">
+              <ol className="history" ref={historyRef}>
                 {history.map((move, index) => (
                   <li
                     key={`${index}-${formatMove(move)}`}
-                    className={`history-move ${index === history.length - 1 ? 'is-latest' : ''}`}
+                    className={`history-move${index === history.length - 1 ? ' is-latest' : ''}`}
                   >
                     {formatMove(move)}
                   </li>
@@ -501,10 +596,11 @@ export default function App() {
               </ol>
             )}
           </div>
+        )}
 
-          <div className="info-block info-block-wide">
-            <div className="info-head">
-              <h2 id="solves-heading">Recent solves</h2>
+        {logTab === 'solves' && (
+          <div className="log-panel" role="tabpanel" id="panel-solves" aria-labelledby="tab-solves">
+            <div className="log-panel-head">
               <button
                 type="button"
                 className="btn btn-micro"
@@ -515,7 +611,7 @@ export default function App() {
               </button>
             </div>
             {stats && stats.recent.length > 0 ? (
-              <ol className="solves" aria-labelledby="solves-heading">
+              <ol className="solves">
                 {stats.recent.slice(0, 8).map((record) => (
                   <li key={record.at} className="solve-row">
                     <span className="solve-time">{formatTime(record.timeMs)}</span>
@@ -524,12 +620,17 @@ export default function App() {
                 ))}
               </ol>
             ) : (
-              <p className="sequence is-empty" aria-labelledby="solves-heading">
-                Solve a scramble to record a time.
-              </p>
+              <p className="sequence is-empty">Solve a scramble to record a time.</p>
             )}
           </div>
-        </div>
+        )}
+
+        <p className="keyboard-hint">
+          Keyboard: <kbd>U</kbd> <kbd>D</kbd> <kbd>L</kbd> <kbd>R</kbd> <kbd>F</kbd>{' '}
+          <kbd>B</kbd> to turn a face, <kbd>M</kbd> <kbd>E</kbd> <kbd>S</kbd> a middle
+          slice, hold <kbd>Shift</kbd> to reverse. The clock starts on your first turn
+          after a scramble.
+        </p>
       </section>
     </div>
   );

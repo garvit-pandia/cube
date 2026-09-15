@@ -23,7 +23,7 @@ faces and middle slices like a real cube, scramble it, and race the clock.
 |---|---|
 | Drag to turn | Grab any sticker and drag it in the direction you want it to go. Outer layers turn that face; the middle row or column turns the `M`/`E`/`S` slice. Drag the background to orbit, scroll to zoom. Works with touch too. |
 | Buttons and keyboard | Full `U D L R F B` panel plus `M E S` slices, each with `X`, `X'`, `X2` variants. Keys: hold `Shift` to reverse, press twice for a half turn. |
-| Two ways to solve | **Replay** undoes your moves in reverse. **Optimal (~20)** computes a near-optimal solution for the cube as it is right now, from any state. |
+| Two ways to solve | **Replay** undoes your moves in reverse. **Optimal solve** computes a near-optimal solution for the cube as it is right now, from any state. |
 | WCA-style scrambles | Random-state scrambles, not just random moves. |
 | Timer and sessions | Wall-clock timer that starts on your first turn, with best time, Ao5, Ao12 and recent solves saved between visits. |
 | Undo and redo | Undo inverses animate through the same queue as everything else. |
@@ -34,7 +34,7 @@ faces and middle slices like a real cube, scramble it, and race the clock.
 | Mode | What it does | When to use it |
 |---|---|---|
 | Replay | Replays your session's turn log in reverse, cancelling and combining moves as it goes. | You just want the cube back the way it was. |
-| Optimal (~20) | Reads the cube's exact state and runs a two-phase search for a short solution, usually 17 to 20 moves. Always available, even after a reload. | You want to see a short solution, or the state came from somewhere else. |
+| Optimal solve | Reads the cube's exact state and runs a two-phase search for a short solution, usually 17 to 20 moves. Always available, even after a reload. | You want to see a short solution, or the state came from somewhere else. |
 
 Auto-solve is never recorded as a solve: the clock freezes, the history stays
 empty, and you can cancel it mid-animation.
