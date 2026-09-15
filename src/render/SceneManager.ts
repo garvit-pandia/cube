@@ -96,6 +96,7 @@ export class SceneManager {
   onBeforeRender: ((deltaSeconds: number, elapsedSeconds: number) => void) | null = null;
 
   readonly container: HTMLElement;
+  private frameHooks = new Set<(deltaSeconds: number, elapsedSeconds: number) => void>();
   private resizeObserver: ResizeObserver;
   private clock = new THREE.Clock();
   private backdrop: THREE.Mesh | null = null;
@@ -201,6 +202,16 @@ export class SceneManager {
     this.resizeObserver.observe(container);
 
     this.renderer.setAnimationLoop(() => this.tick());
+  }
+
+  /**
+   * Register a per-frame callback. Returns an unregister function. Hooks run
+   * after `onBeforeRender` and before controls/render, like the controller's
+   * own turn animation.
+   */
+  registerFrameHook(fn: (deltaSeconds: number, elapsedSeconds: number) => void): () => void {
+    this.frameHooks.add(fn);
+    return () => this.frameHooks.delete(fn);
   }
 
   private buildBackdrop(): void {
@@ -352,6 +363,7 @@ export class SceneManager {
       }
     }
     this.onBeforeRender?.(delta, this.clock.elapsedTime);
+    for (const hook of this.frameHooks) hook(delta, this.clock.elapsedTime);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
@@ -362,6 +374,7 @@ export class SceneManager {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.onBeforeRender = null;
+    this.frameHooks.clear();
 
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;

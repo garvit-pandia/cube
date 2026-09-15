@@ -6,11 +6,14 @@ export interface Settings {
   readonly animationSpeed: AnimationSpeed;
   /** Force reduced motion even when the OS does not ask for it. */
   readonly forceReducedMotion: boolean;
+  /** Play synthesized turn/solve sounds (unlocked by the first gesture). */
+  readonly sound: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   animationSpeed: 'normal',
   forceReducedMotion: false,
+  sound: true,
 };
 
 const STORAGE_KEY = 'cube3:settings';
@@ -47,6 +50,8 @@ export function loadSettings(storage: StorageLike | null): Settings {
         typeof candidate.forceReducedMotion === 'boolean'
           ? candidate.forceReducedMotion
           : DEFAULT_SETTINGS.forceReducedMotion,
+      sound:
+        typeof candidate.sound === 'boolean' ? candidate.sound : DEFAULT_SETTINGS.sound,
     };
   } catch {
     return DEFAULT_SETTINGS;

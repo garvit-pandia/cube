@@ -14,6 +14,7 @@ import { fakeStorage } from '../test/support';
 describe('settings', () => {
   it('falls back to defaults when storage is missing', () => {
     expect(loadSettings(null)).toEqual(DEFAULT_SETTINGS);
+    expect(DEFAULT_SETTINGS.sound).toBe(true);
   });
 
   it('falls back to defaults when nothing is stored', () => {
@@ -23,7 +24,11 @@ describe('settings', () => {
 
   it('round-trips through storage', () => {
     const { storage } = fakeStorage();
-    const settings: Settings = { animationSpeed: 'fast', forceReducedMotion: true };
+    const settings: Settings = {
+      animationSpeed: 'fast',
+      forceReducedMotion: true,
+      sound: false,
+    };
     saveSettings(storage, settings);
     expect(loadSettings(storage)).toEqual(settings);
   });
@@ -36,16 +41,28 @@ describe('settings', () => {
 
   it('rejects unknown values field by field', () => {
     const { storage } = fakeStorage({
-      'cube3:settings': JSON.stringify({ animationSpeed: 'ludicrous', forceReducedMotion: 'yes' }),
+      'cube3:settings': JSON.stringify({
+        animationSpeed: 'ludicrous',
+        forceReducedMotion: 'yes',
+        sound: 'yes',
+      }),
     });
     expect(loadSettings(storage)).toEqual(DEFAULT_SETTINGS);
   });
 
   it('keeps valid fields when only one is invalid', () => {
     const { storage } = fakeStorage({
-      'cube3:settings': JSON.stringify({ animationSpeed: 'instant', forceReducedMotion: 'yes' }),
+      'cube3:settings': JSON.stringify({
+        animationSpeed: 'instant',
+        forceReducedMotion: 'yes',
+        sound: 'yes',
+      }),
     });
-    expect(loadSettings(storage)).toEqual({ animationSpeed: 'instant', forceReducedMotion: false });
+    expect(loadSettings(storage)).toEqual({
+      animationSpeed: 'instant',
+      forceReducedMotion: false,
+      sound: true,
+    });
   });
 
   it('never throws without storage', () => {
@@ -55,9 +72,19 @@ describe('settings', () => {
 
 describe('animation scale', () => {
   it('maps speeds to increasing brevity', () => {
-    expect(animationScaleFor({ animationSpeed: 'normal', forceReducedMotion: false })).toBe(1);
-    const fast = animationScaleFor({ animationSpeed: 'fast', forceReducedMotion: false });
-    const instant = animationScaleFor({ animationSpeed: 'instant', forceReducedMotion: false });
+    expect(
+      animationScaleFor({ animationSpeed: 'normal', forceReducedMotion: false, sound: true }),
+    ).toBe(1);
+    const fast = animationScaleFor({
+      animationSpeed: 'fast',
+      forceReducedMotion: false,
+      sound: true,
+    });
+    const instant = animationScaleFor({
+      animationSpeed: 'instant',
+      forceReducedMotion: false,
+      sound: true,
+    });
     expect(fast).toBeLessThan(1);
     expect(fast).toBeGreaterThan(instant);
     expect(instant).toBeGreaterThan(0);

@@ -321,6 +321,16 @@ export default function App() {
                 />
                 <span>Reduce motion</span>
               </label>
+              <label className="settings-option">
+                <input
+                  type="checkbox"
+                  checked={settings.sound}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, sound: event.target.checked }))
+                  }
+                />
+                <span>Sound</span>
+              </label>
               {osReducedMotion && (
                 <p className="settings-note">
                   Your system already requests reduced motion; turns are instant.
