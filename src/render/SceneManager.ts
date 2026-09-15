@@ -134,6 +134,10 @@ export class SceneManager {
     return CONTENT_RADIUS / Math.sin(Math.min(vFov, hFov) / 2);
   }
 
+  /** Framing distance for the cinema rig (it must not duplicate this math). */
+  get framedDistance(): number {
+    return this.frameDistance();
+  }
   /** Recompute the default camera station for the current aspect ratio. */
   private applyFraming(): void {
     const distance = this.frameDistance();

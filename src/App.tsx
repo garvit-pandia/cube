@@ -19,6 +19,7 @@ import { formatSequence } from './cube/scramble';
 import type { MoveFace } from './cube/types';
 import { FACE_LETTERS, MOVE_FACES, SLICE_LETTERS } from './cube/types';
 import { CelebrationRig } from './render/CelebrationRig';
+import { CinemaRig } from './render/CinemaRig';
 import { PointerTurnHandler } from './render/PointerTurnHandler';
 import { SceneManager } from './render/SceneManager';
 import { SoundRig } from './render/SoundRig';
@@ -89,6 +90,7 @@ export default function App() {
   const sceneRef = useRef<SceneManager | null>(null);
   const soundRef = useRef<SoundRig | null>(null);
   const celebrationRef = useRef<CelebrationRig | null>(null);
+  const cinemaRef = useRef<CinemaRig | null>(null);
   const historyRef = useRef<HTMLOListElement>(null);
   const logTabsRef = useRef<HTMLDivElement>(null);
   const solvingRef = useRef(false);
@@ -140,6 +142,12 @@ export default function App() {
     const celebration = new CelebrationRig(scene.scene, controller.renderer, scene);
     celebrationRef.current = celebration;
 
+    // Cinematic orbit rig for demo mode (M7); idle until setActive(true).
+    const cinema = new CinemaRig(scene, {
+      reducedMotion: () => settingsRef.current.forceReducedMotion,
+    });
+    cinemaRef.current = cinema;
+
     // Sticker drags become face or slice turns; background drags stay orbit.
     const pointerTurn = new PointerTurnHandler(scene, {
       stickerInfo: (cubeletId, stickerIndex) => controller.stickerInfo(cubeletId, stickerIndex),
@@ -177,6 +185,8 @@ export default function App() {
       soundRef.current = null;
       celebration.dispose();
       celebrationRef.current = null;
+      cinema.dispose();
+      cinemaRef.current = null;
       pointerTurn.dispose();
       unsubscribe();
       controller.renderer.setFrameSource(null);
