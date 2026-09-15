@@ -16,8 +16,13 @@ STATE RIGHT NOW:
 - M3 is half-applied and UNCOMMITTED: candidate A values are already in src/render/palette.ts and src/render/SceneManager.ts; the temporary DEV-only ?ab camera lock is in src/App.tsx; "before" screenshot is already taken. Follow the remaining M3 steps exactly as written in SHOWCASE-PLAN.md section 6 (shot A -> apply candidate B -> shot B -> pick by the locked rule -> DELETE the ?ab code -> verify -> commit).
 - Working tree is otherwise clean. The only modified files must be the three M3 files listed above; if you find anything else modified, stop and report it in the final output instead of guessing.
 
+MODELS (pinned — do not switch, do not re-ask):
+- Main: muse-spark-1.3-contributor at xhigh. If the session is not already on xhigh, switch via /model before M3.
+- Vision: commandcode/deepseek-v4.1-flash (pinned in agent/vision.md). Use the low variant for the M3 A/B binary check, high for every polish-round /10 critique. If per-call variants are unsupported, emulate: M3 = one-line verdict only; polish = full ranked critique.
+- Fallback: main is vision-capable. If vision fails/times out twice on the same image, read the screenshot directly and proceed; note it in the report.
+
 DECISIONS THE USER ALREADY LOCKED (do not re-ask, do not deviate):
-1. M3 A/B pick: plan-default rule — choose B unless sticker highlights blow out; judge by dispatching the screenshots to the vision subagent (the main model cannot see images). No user review overnight.
+1. M3 A/B pick: plan-default rule — choose B unless sticker highlights blow out; judge via the vision subagent (low variant; main is vision-capable fallback). No user review overnight.
 2. All commits stay LOCAL on main. NEVER git push — pushing triggers the GitHub Pages deploy and would publish unreviewed work.
 3. Manual QA findings go in the final report message only; do not create QA notes files.
 4. Do not add npm dependencies. Do not touch tsconfig.json, src/cube/*, src/session/*, src/cube/min2phase.js, or anything outside the files each milestone names (plus new files the plan says to create).
@@ -50,7 +55,7 @@ ENVIRONMENT FACTS & GOTCHAS (verified this session; also in SHOWCASE-PLAN.md sec
 - WSL2 serves stale modules under native watching; vite.config.ts uses polling. After edits, verify fresh serving with: curl -s http://localhost:5179/src/<File>.ts | grep <symbol> — but grep MINIFIED shapes (esbuild rewrites 1.0 -> 1, 0.55 -> .55), e.g. "clearcoat: 1" not "clearcoat: 1.0".
 - Headless software WebGL is slow: never wait a fixed 600 ms for a turn to land; wait for window.__cube3.controller.snapshot().busy === false then ~800 ms for React effects.
 - PointerTurnHandler stops propagation in the container's CAPTURE phase, so any window-level pointerdown listener must be registered with { capture: true } (and removed with the same flag) or it will never see cube clicks.
-- The main model cannot see images: route every screenshot judgment through the vision subagent.
+- Route every screenshot judgment through the vision subagent first (low for M3, high for polish critiques); main is vision-capable — after two vision failures on the same image, read it directly and proceed.
 - Screenshots for the definition-of-done go to /tmp/opencode/cube3-design/ (before.png already there; screenshot.mjs is the shot helper: run "node /tmp/opencode/cube3-design/screenshot.mjs <name>" from the repo root).
 - StrictMode double-mounts effects in dev: keep every setup/teardown symmetric (sound rig, rigs, listeners, refs).
 - TS 6 strict: noUnusedLocals/noUnusedParameters will catch stray code; erasableSyntaxOnly means no enum/namespace/parameter properties; verbatimModuleSyntax means import type for type-only imports.
