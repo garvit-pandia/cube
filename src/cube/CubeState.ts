@@ -1,6 +1,6 @@
-import { FACE_AXES, CUBE_COLORS } from './palette';
-import type { AxisName, FaceLetter, Mat3, Move, Vec3 } from './types';
-import { FACE_LETTERS, IDENTITY } from './types';
+import { MOVE_AXES, CUBE_COLORS } from './palette';
+import type { AxisName, FaceLetter, Mat3, Move, MoveFace, Vec3 } from './types';
+import { FACE_LETTERS, IDENTITY, isSliceLetter } from './types';
 
 /** One physical piece of the cube: where it started, where it is, how it is turned. */
 export interface Cubie {
@@ -79,7 +79,7 @@ export class CubeState {
           const home: Vec3 = [x, y, z];
           const stickers: { normal: Vec3; color: string }[] = [];
           for (const face of FACE_LETTERS) {
-            const { normal, axis } = FACE_AXES[face];
+            const { normal, axis } = MOVE_AXES[face];
             if (home[AXIS_INDEX[axis]] === normal[AXIS_INDEX[axis]]) {
               stickers.push({ normal, color: CUBE_COLORS[face] });
             }
@@ -99,27 +99,29 @@ export class CubeState {
     return this.cubies[id];
   }
 
-  /** Cubie ids belonging to the layer that `face` turns. */
-  layerIds(face: FaceLetter): number[] {
-    const { axis, sign } = FACE_AXES[face];
+  /** Cubie ids belonging to the layer that `face` turns (the middle layer for M/E/S). */
+  layerIds(face: MoveFace): number[] {
+    const { axis, sign } = MOVE_AXES[face];
     const index = AXIS_INDEX[axis];
-    return this.cubies.filter((c) => c.position[index] === sign).map((c) => c.id);
+    const layer = isSliceLetter(face) ? 0 : sign;
+    return this.cubies.filter((c) => c.position[index] === layer).map((c) => c.id);
   }
 
   /**
-   * Apply one face turn. `turns` counts clockwise quarter turns seen from
-   * outside the face, so the right-hand rotation about the positive axis is
-   * -turns for a positive normal and +turns for a negative one.
+   * Apply one layer turn. `turns` counts clockwise quarter turns seen from
+   * outside the face the layer follows, so the right-hand rotation about the
+   * positive axis is -turns for a positive sign and +turns for a negative one.
    */
   applyMove(move: Move): void {
-    const { axis, sign } = FACE_AXES[move.face];
+    const { axis, sign } = MOVE_AXES[move.face];
     const index = AXIS_INDEX[axis];
+    const layer = isSliceLetter(move.face) ? 0 : sign;
     const quarters = ((((-move.turns * sign) % 4) + 4) % 4) as 0 | 1 | 2 | 3;
     if (quarters === 0) return;
     const rotation = ROTATION_MATRICES[axis][quarters];
 
     this.cubies = this.cubies.map((c) =>
-      c.position[index] !== sign
+      c.position[index] !== layer
         ? c
         : {
             ...c,
@@ -146,7 +148,7 @@ export class CubeState {
    */
   isSolved(): boolean {
     for (const face of FACE_LETTERS) {
-      const { normal } = FACE_AXES[face];
+      const { normal } = MOVE_AXES[face];
       let seen: string | null = null;
       for (const cubie of this.cubies) {
         for (const sticker of cubie.stickers) {
@@ -166,7 +168,7 @@ export class CubeState {
       for (const sticker of cubie.stickers) {
         const world = applyMatrix(cubie.rotation, sticker.normal);
         for (const face of FACE_LETTERS) {
-          if (sameVec(world, FACE_AXES[face].normal)) counts[face]++;
+          if (sameVec(world, MOVE_AXES[face].normal)) counts[face]++;
         }
       }
     }

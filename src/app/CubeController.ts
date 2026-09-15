@@ -2,7 +2,7 @@ import { CubeState } from '../cube/CubeState';
 import { stickerWorldNormal } from '../cube/dragTurn';
 import { isSolverError, solutionToMoves, toFacelets } from '../cube/facelets';
 import { invertMove, invertMoves, simplifyMoves } from '../cube/notation';
-import { FACE_AXES } from '../cube/palette';
+import { MOVE_AXES } from '../cube/palette';
 import { generateScramble, formatSequence } from '../cube/scramble';
 import type { Move, Vec3 } from '../cube/types';
 import type { SceneManager } from '../render/SceneManager';
@@ -460,7 +460,7 @@ export class CubeController {
   }
 
   private startTurn(entry: QueuedMove): void {
-    const { axis, sign } = FACE_AXES[entry.move.face];
+    const { axis, sign } = MOVE_AXES[entry.move.face];
     const quarters = entry.move.turns === 1 ? 1 : entry.move.turns === 2 ? 2 : -1;
     this.active = {
       entry,

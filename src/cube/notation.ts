@@ -1,10 +1,10 @@
-import type { FaceLetter, Move } from './types';
-import { FACE_LETTERS } from './types';
+import type { Move, MoveFace } from './types';
+import { MOVE_FACES } from './types';
 
 const SUFFIX_BY_TURNS: Record<1 | 2 | 3, string> = { 1: '', 2: '2', 3: "'" };
 const TURNS_BY_SUFFIX: Record<string, 1 | 2 | 3> = { '': 1, '2': 2, "'": 3 };
 
-/** Render one move in Singmaster notation, e.g. `R`, `R2`, `R'`. */
+/** Render one move in Singmaster notation, e.g. `R`, `R2`, `R'`, `M`, `S2`. */
 export function formatMove(move: Move): string {
   return `${move.face}${SUFFIX_BY_TURNS[move.turns]}`;
 }
@@ -13,17 +13,17 @@ export function formatMoves(moves: readonly Move[]): string {
   return moves.map(formatMove).join(' ');
 }
 
-/** Parse a single token such as `R'` or `u2`. Throws on malformed input. */
+/** Parse a single token such as `R'`, `u2` or `M'`. Throws on malformed input. */
 export function parseMove(token: string): Move {
   const trimmed = token.trim();
   const face = trimmed[0]?.toUpperCase();
-  if (!face || !FACE_LETTERS.includes(face as FaceLetter)) {
+  if (!face || !MOVE_FACES.includes(face as MoveFace)) {
     throw new Error(`Invalid move: "${token}"`);
   }
   const suffix = trimmed.slice(1);
   const turns = TURNS_BY_SUFFIX[suffix];
   if (turns === undefined) throw new Error(`Invalid move: "${token}"`);
-  return { face: face as FaceLetter, turns };
+  return { face: face as MoveFace, turns };
 }
 
 export function parseMoves(sequence: string): Move[] {
@@ -43,9 +43,9 @@ export function invertMoves(moves: readonly Move[]): Move[] {
 }
 
 /**
- * Fold adjacent turns on the same face: `R R` -> `R2`, `R2 R` -> `R'`, and
- * pairs that cancel (`R R'`) disappear entirely. Turns on different faces keep
- * their order. Used to shorten auto-solve sequences.
+ * Fold adjacent turns on the same layer: `R R` -> `R2`, `R2 R` -> `R'`, and
+ * pairs that cancel (`R R'`) disappear entirely. Turns on different layers
+ * keep their order. Used to shorten auto-solve sequences.
  */
 export function simplifyMoves(moves: readonly Move[]): Move[] {
   const out: Move[] = [];

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { CubeState } from './CubeState';
 import { invertMoves, parseMoves } from './notation';
-import type { Move } from './types';
-import { FACE_LETTERS } from './types';
+import type { Move, MoveFace } from './types';
+import { FACE_LETTERS, IDENTITY, MOVE_FACES, SLICE_LETTERS } from './types';
 import { mulberry32 } from '../test/support';
 
 function apply(state: CubeState, sequence: string): void {
@@ -19,7 +19,7 @@ function play(sequence: string): CubeState {
 const SUFFIXES = ['', "'", '2'] as const;
 
 function randomMove(rng: () => number): Move {
-  const face = FACE_LETTERS[Math.floor(rng() * FACE_LETTERS.length)];
+  const face = MOVE_FACES[Math.floor(rng() * MOVE_FACES.length)];
   const suffix = SUFFIXES[Math.floor(rng() * SUFFIXES.length)];
   return { face, turns: suffix === '' ? 1 : suffix === '2' ? 2 : 3 };
 }
@@ -74,23 +74,23 @@ describe('cube construction', () => {
 });
 
 describe('documented sequence tests', () => {
-  it.each(FACE_LETTERS)('returns to solved after four clockwise %s turns', (face) => {
+  it.each(MOVE_FACES)('returns to solved after four clockwise %s turns', (face) => {
     expect(play(`${face} ${face} ${face} ${face}`).isSolved()).toBe(true);
   });
 
-  it.each(FACE_LETTERS)('returns to solved after two %s2 double turns', (face) => {
+  it.each(MOVE_FACES)('returns to solved after two %s2 double turns', (face) => {
     expect(play(`${face}2 ${face}2`).isSolved()).toBe(true);
   });
 
-  it.each(FACE_LETTERS)('returns to solved after %s followed by its inverse', (face) => {
+  it.each(MOVE_FACES)('returns to solved after %s followed by its inverse', (face) => {
     expect(play(`${face} ${face}'`).isSolved()).toBe(true);
   });
 
-  it.each(FACE_LETTERS)('returns to solved after %s %s %s2', (face) => {
+  it.each(MOVE_FACES)('returns to solved after %s %s %s2', (face) => {
     expect(play(`${face} ${face} ${face}2`).isSolved()).toBe(true);
   });
 
-  it.each(FACE_LETTERS)('treats three clockwise %s turns as one inverse turn', (face) => {
+  it.each(MOVE_FACES)('treats three clockwise %s turns as one inverse turn', (face) => {
     expect(play(`${face} ${face} ${face}`).serialize()).toBe(play(`${face}'`).serialize());
   });
 
@@ -98,8 +98,8 @@ describe('documented sequence tests', () => {
     expect(play("R U F D L B B' L' D' F' U' R'").isSolved()).toBe(true);
   });
 
-  it('leaves the cube mixed after a single quarter turn of any face', () => {
-    for (const face of FACE_LETTERS) expect(play(face).isSolved()).toBe(false);
+  it('leaves the cube mixed after a single quarter turn of any layer', () => {
+    for (const face of MOVE_FACES) expect(play(face).isSolved()).toBe(false);
   });
 
   it('leaves the cube mixed after R U', () => {
@@ -220,18 +220,44 @@ describe('layer selection', () => {
     }
   });
 
-  it('selects the same nine cubelets after the cube is turned', () => {
+  it('selects exactly nine distinct middle cubelets per slice', () => {
+    const state = new CubeState();
+    for (const slice of SLICE_LETTERS) {
+      const ids = state.layerIds(slice);
+      expect(ids).toHaveLength(9);
+      expect(new Set(ids).size).toBe(9);
+    }
+  });
+
+  it('selects the same nine cubelets per layer after the cube is turned', () => {
     const state = play('R U F');
-    for (const face of FACE_LETTERS) {
+    for (const face of MOVE_FACES) {
       expect(state.layerIds(face)).toHaveLength(9);
     }
   });
 
-  it('keeps the core cubelet out of every layer', () => {
+  it('selects only coordinate-zero cubelets for a slice', () => {
+    const state = play('M E S');
+    const cases: [MoveFace, 0 | 1 | 2][] = [
+      ['M', 0],
+      ['E', 1],
+      ['S', 2],
+    ];
+    for (const [slice, index] of cases) {
+      for (const id of state.layerIds(slice)) {
+        expect(state.byId(id)!.position[index]).toBe(0);
+      }
+    }
+  });
+
+  it('keeps the core cubelet out of every face layer', () => {
     const state = new CubeState();
     const core = state.all().find((c) => c.home.every((v) => v === 0));
     expect(core).toBeDefined();
     for (const face of FACE_LETTERS) expect(state.layerIds(face)).not.toContain(core!.id);
+    // The core sits at the centre of all three slices. It has no stickers, so
+    // turning it is invisible, but it is physically part of those layers.
+    for (const slice of SLICE_LETTERS) expect(state.layerIds(slice)).toContain(core!.id);
   });
 });
 
@@ -243,6 +269,11 @@ describe('move conventions', () => {
     ['D', [0, -1, 1], [1, -1, 0]],
     ['L', [-1, 1, 1], [-1, -1, 1]],
     ['B', [0, 1, -1], [-1, 0, -1]],
+    // Slices turn the middle layer the way the face they follow turns its own.
+    ['M', [0, 1, 0], [0, 0, 1]],
+    ['M', [0, 1, 1], [0, -1, 1]],
+    ['E', [0, 0, 1], [1, 0, 0]],
+    ['S', [0, 1, 0], [1, 0, 0]],
   ];
 
   it.each(cases)('sends the %s layer where Singmaster says it goes', (face, from, to) => {
@@ -253,8 +284,24 @@ describe('move conventions', () => {
     expect(state.byId(cubie!.id)!.position).toEqual(to);
   });
 
-  it('moves every face away from the pristine state for each turn variant', () => {
-    for (const face of FACE_LETTERS) {
+  it('turns only the middle layer, leaving outer cubelets untouched', () => {
+    const cases: [MoveFace, 0 | 1 | 2][] = [
+      ['M', 0],
+      ['E', 1],
+      ['S', 2],
+    ];
+    for (const [slice, index] of cases) {
+      const state = play(slice);
+      for (const cubie of state.all()) {
+        if (cubie.home[index] === 0) continue;
+        expect(cubie.position).toEqual(cubie.home);
+        expect(cubie.rotation).toEqual(IDENTITY);
+      }
+    }
+  });
+
+  it('moves every layer away from the pristine state for each turn variant', () => {
+    for (const face of MOVE_FACES) {
       expect(play(face).serialize()).not.toBe(PRISTINE);
       expect(play(`${face}'`).serialize()).not.toBe(PRISTINE);
       expect(play(`${face}2`).serialize()).not.toBe(PRISTINE);
@@ -262,7 +309,7 @@ describe('move conventions', () => {
   });
 
   it('treats a prime turn as the opposite quarter turn', () => {
-    for (const face of FACE_LETTERS) {
+    for (const face of MOVE_FACES) {
       expect(play(`${face} ${face}'`).serialize()).toBe(PRISTINE);
       expect(play(`${face}2 ${face}2`).serialize()).toBe(PRISTINE);
       expect(play(`${face} ${face}2`).serialize()).toBe(play(`${face}'`).serialize());

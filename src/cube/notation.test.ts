@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { CubeState } from './CubeState';
-import { invertMoves, parseMoves, simplifyMoves } from './notation';
+import { formatMoves, invertMoves, parseMoves, simplifyMoves } from './notation';
 import type { Move } from './types';
-import { FACE_LETTERS } from './types';
+import { MOVE_FACES } from './types';
 import { mulberry32 } from '../test/support';
 
 function randomMove(rng: () => number): Move {
-  const face = FACE_LETTERS[Math.floor(rng() * FACE_LETTERS.length)];
+  const face = MOVE_FACES[Math.floor(rng() * MOVE_FACES.length)];
   const turns = (1 + Math.floor(rng() * 3)) as 1 | 2 | 3;
   return { face, turns };
 }
@@ -42,6 +42,19 @@ describe('simplifyMoves', () => {
     expect(simplifyMoves(parseMoves('R2 R'))).toEqual(parseMoves("R'"));
     expect(simplifyMoves(parseMoves('R R2'))).toEqual(parseMoves("R'"));
     expect(simplifyMoves(parseMoves("R' R'"))).toEqual(parseMoves('R2'));
+  });
+
+  it('parses, formats and folds middle-slice turns', () => {
+    expect(formatMoves(parseMoves("M E2 S'"))).toBe("M E2 S'");
+    expect(simplifyMoves(parseMoves('M M'))).toEqual(parseMoves('M2'));
+    expect(simplifyMoves(parseMoves("S' S'"))).toEqual(parseMoves('S2'));
+    expect(simplifyMoves(parseMoves("E E'"))).toEqual([]);
+  });
+
+  it('keeps a slice and a face on the same axis apart', () => {
+    expect(simplifyMoves(parseMoves('M L'))).toEqual(parseMoves('M L'));
+    expect(simplifyMoves(parseMoves('M L M'))).toEqual(parseMoves('M L M'));
+    expect(simplifyMoves(parseMoves('S F'))).toEqual(parseMoves('S F'));
   });
 
   it('keeps turns on different faces in order', () => {

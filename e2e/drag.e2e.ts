@@ -1,6 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-import { enqueueMoves, FACE_LETTERS, gotoCube, pollFor, snapshot, waitIdle } from './support';
+import {
+  enqueueMoves,
+  gotoCube,
+  MOVE_FACES,
+  pollFor,
+  snapshot,
+  stickerScreenPoint,
+  waitIdle,
+} from './support';
 
 interface Box {
   x: number;
@@ -58,7 +66,7 @@ test.describe('drag-to-turn (via __cube3 seam)', () => {
       await drag(page, x, y, dx, dy);
       const after = await pollFor(page, (s) => s.history.length === before + 1);
       const move = after.history[after.history.length - 1];
-      expect(FACE_LETTERS).toContain(move.face);
+      expect(MOVE_FACES).toContain(move.face);
       expect([1, 2, 3]).toContain(move.turns);
       before = after.history.length;
     }
@@ -78,21 +86,32 @@ test.describe('drag-to-turn (via __cube3 seam)', () => {
     expect(after.history).toHaveLength(before);
   });
 
-  test('a drag that resolves to a middle slice does not turn the cube', async ({ page }) => {
+  test('dragging a face centre sideways turns the equator slice', async ({ page }) => {
     await gotoCube(page);
     await waitIdle(page);
     const box = await canvasBox(page);
-    const cx = box.x + box.width / 2;
-    const cy = box.y + box.height / 2;
     const unit = Math.min(box.width, box.height);
 
-    // Whatever the raycast hits near the upper cube region, a horizontal drag
-    // may resolve to a middle slice; history may then grow by at most the
-    // drag-to-orbit baseline of zero committed moves.
+    // The F centre cubelet sits in the y = 0 slice, so a sideways drag across
+    // it must resolve to an E turn (either direction) and be recorded.
+    const centre = await stickerScreenPoint(page, [0, 0, 1]);
     const before = (await snapshot(page)).history.length;
-    await drag(page, cx, cy - 0.15 * unit, 0.3 * unit, 0);
-    const after = await snapshot(page);
-    expect(after.history.length - before).toBeLessThanOrEqual(1);
+    await drag(page, centre.x, centre.y, 0.3 * unit, 0);
+    const after = await pollFor(page, (s) => s.history.length === before + 1);
+    expect(after.history[after.history.length - 1].face).toBe('E');
+  });
+
+  test('dragging a face centre vertically turns the middle slice', async ({ page }) => {
+    await gotoCube(page);
+    await waitIdle(page);
+    const box = await canvasBox(page);
+    const unit = Math.min(box.width, box.height);
+
+    const centre = await stickerScreenPoint(page, [0, 0, 1]);
+    const before = (await snapshot(page)).history.length;
+    await drag(page, centre.x, centre.y, 0, -0.3 * unit);
+    const after = await pollFor(page, (s) => s.history.length === before + 1);
+    expect(after.history[after.history.length - 1].face).toBe('M');
   });
 
   test('drags never inject moves while the queue is busy', async ({ page }) => {

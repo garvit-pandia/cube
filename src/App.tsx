@@ -15,8 +15,8 @@ import {
 import { formatMove } from './cube/notation';
 import { FACE_NAMES } from './cube/palette';
 import { formatSequence } from './cube/scramble';
-import type { FaceLetter } from './cube/types';
-import { FACE_LETTERS } from './cube/types';
+import type { MoveFace } from './cube/types';
+import { FACE_LETTERS, MOVE_FACES, SLICE_LETTERS } from './cube/types';
 import { PointerTurnHandler } from './render/PointerTurnHandler';
 import { SceneManager } from './render/SceneManager';
 import { formatTime } from './session/SolveSession';
@@ -26,6 +26,40 @@ const MOVE_VARIANTS: readonly { suffix: string; turns: 1 | 2 | 3; title: string 
   { suffix: "'", turns: 3, title: 'counter-clockwise' },
   { suffix: '2', turns: 2, title: 'half turn' },
 ];
+
+/** One labelled group of three buttons: a layer and its quarter turns. */
+function MoveGroup({
+  face,
+  disabled,
+  onPlay,
+}: {
+  face: MoveFace;
+  disabled: boolean;
+  onPlay: (face: MoveFace, turns: 1 | 2 | 3) => void;
+}) {
+  return (
+    <div className="move-group">
+      <span className="move-face" aria-hidden="true">
+        {FACE_NAMES[face]}
+      </span>
+      <div className="move-buttons">
+        {MOVE_VARIANTS.map((variant) => (
+          <button
+            type="button"
+            key={variant.suffix}
+            className="btn btn-move"
+            onClick={() => onPlay(face, variant.turns)}
+            aria-label={`${FACE_NAMES[face]} ${variant.title}`}
+            disabled={disabled}
+          >
+            {face}
+            {variant.suffix}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const PHASE_LABEL: Record<CubeSnapshot['phase'], string> = {
   idle: 'Ready',
@@ -70,7 +104,7 @@ export default function App() {
     const unsubscribe = controller.subscribe(setSnapshot);
     setSnapshot(controller.snapshot());
 
-    // Sticker drags become face turns; background and centre drags stay orbit.
+    // Sticker drags become face or slice turns; background drags stay orbit.
     const pointerTurn = new PointerTurnHandler(scene, {
       stickerInfo: (cubeletId, stickerIndex) => controller.stickerInfo(cubeletId, stickerIndex),
       canStart: () => controller.canDrag(),
@@ -129,7 +163,7 @@ export default function App() {
     saveSidebarOpen(safeStorage(), sidebarOpen);
   }, [sidebarOpen]);
 
-  const playMove = useCallback((face: FaceLetter, turns: 1 | 2 | 3) => {
+  const playMove = useCallback((face: MoveFace, turns: 1 | 2 | 3) => {
     controllerRef.current?.enqueue({ face, turns });
   }, []);
 
@@ -142,9 +176,9 @@ export default function App() {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       const key = event.key.toUpperCase();
-      if (!FACE_LETTERS.includes(key as FaceLetter)) return;
+      if (!MOVE_FACES.includes(key as MoveFace)) return;
       event.preventDefault();
-      playMove(key as FaceLetter, event.shiftKey ? 3 : 1);
+      playMove(key as MoveFace, event.shiftKey ? 3 : 1);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -274,7 +308,8 @@ export default function App() {
           aria-label={cubeDescription}
         />
         <div className="stage-hint" aria-hidden="true">
-          Drag a sticker to turn &middot; drag around it to orbit &middot; scroll to zoom
+          Drag a sticker to turn a face or middle slice &middot; drag the background to
+          orbit &middot; scroll to zoom
         </div>
         {!sceneReady && (
           <div className="stage-loading" role="status">
@@ -404,33 +439,21 @@ export default function App() {
 
         <div className="moves" role="group" aria-label="Face turns">
           {FACE_LETTERS.map((face) => (
-            <div className="move-group" key={face}>
-              <span className="move-face" aria-hidden="true">
-                {FACE_NAMES[face]}
-              </span>
-              <div className="move-buttons">
-                {MOVE_VARIANTS.map((variant) => (
-                  <button
-                    type="button"
-                    key={variant.suffix}
-                    className="btn btn-move"
-                    onClick={() => playMove(face, variant.turns)}
-                    aria-label={`${FACE_NAMES[face]} ${variant.title}`}
-                    disabled={solving}
-                  >
-                    {face}
-                    {variant.suffix}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <MoveGroup key={face} face={face} disabled={solving} onPlay={playMove} />
+          ))}
+        </div>
+
+        <div className="moves" role="group" aria-label="Middle-slice turns">
+          {SLICE_LETTERS.map((slice) => (
+            <MoveGroup key={slice} face={slice} disabled={solving} onPlay={playMove} />
           ))}
         </div>
 
         <p className="keyboard-hint">
-          Keyboard: <kbd>U</kbd> <kbd>D</kbd> <kbd>L</kbd> <kbd>R</kbd> <kbd>F</kbd> <kbd>B</kbd> to
-          turn, hold <kbd>Shift</kbd> to reverse. The clock starts on your first turn after a
-          scramble.
+          Keyboard: <kbd>U</kbd> <kbd>D</kbd> <kbd>L</kbd> <kbd>R</kbd> <kbd>F</kbd>{' '}
+          <kbd>B</kbd> to turn a face, <kbd>M</kbd> <kbd>E</kbd> <kbd>S</kbd> a middle
+          slice, hold <kbd>Shift</kbd> to reverse. The clock starts on your first turn
+          after a scramble.
         </p>
 
         <div className="info">

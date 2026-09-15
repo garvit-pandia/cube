@@ -1,5 +1,5 @@
 import { applyMatrix } from './CubeState';
-import { CUBE_COLORS, FACE_AXES } from './palette';
+import { CUBE_COLORS, MOVE_AXES } from './palette';
 import type { FaceLetter, Move, Vec3 } from './types';
 import { FACE_LETTERS } from './types';
 
@@ -57,7 +57,7 @@ export function toFacelets(source: FaceletSource): string {
       const world = applyMatrix(cubie.rotation, sticker.normal);
       for (const face of FACE_LETTERS) {
         if (stickerIndex(face, cubie.position) === -1) continue;
-        const { normal } = FACE_AXES[face];
+        const { normal } = MOVE_AXES[face];
         if (world[0] !== normal[0] || world[1] !== normal[1] || world[2] !== normal[2]) continue;
         out[OFFSET[face] + stickerIndex(face, cubie.position)] = FACE_BY_COLOR[sticker.color];
       }

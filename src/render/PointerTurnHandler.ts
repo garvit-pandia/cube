@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { isDraggableSticker, resolveDragTurn } from '../cube/dragTurn';
+import { resolveDragTurn } from '../cube/dragTurn';
 import type { Move, Vec3 } from '../cube/types';
 import type { SceneManager } from './SceneManager';
 
@@ -27,12 +27,13 @@ const TURN_THRESHOLD_WORLD = 0.35;
 const TURN_THRESHOLD_PIXELS = 24;
 
 /**
- * Turns sticker drags into face turns. A pointerdown on a draggable sticker
- * (corner or edge cubelet) is intercepted in the container's capture phase, so
- * OrbitControls never sees the gesture and no controls state is touched. The
- * drag is projected onto the sticker's face plane and resolved to a move once
- * it passes both thresholds. Background and face-centre drags are left alone
- * and orbit exactly as before. Touch follows the same pointer-event path.
+ * Turns sticker drags into layer turns. A pointerdown on any sticker is
+ * intercepted in the container's capture phase, so OrbitControls never sees
+ * the gesture and no controls state is touched. The drag is projected onto the
+ * sticker's face plane and resolved to a move once it passes both thresholds;
+ * an outer layer is a face turn and a middle layer is an M/E/S slice turn.
+ * Background drags are left alone and orbit exactly as before. Touch follows
+ * the same pointer-event path.
  */
 export class PointerTurnHandler {
   private readonly scene: SceneManager;
@@ -77,7 +78,7 @@ export class PointerTurnHandler {
     const hit = this.raycastSticker(event.clientX, event.clientY);
     if (!hit) return;
     const info = this.opts.stickerInfo(hit.cubeletId, hit.stickerIndex);
-    if (!info || !isDraggableSticker(info.position)) return;
+    if (!info) return;
 
     // Face plane just outside the sticker surface. Only the drag's direction
     // matters, so the exact offset along the normal is irrelevant.

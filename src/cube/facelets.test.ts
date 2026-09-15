@@ -55,6 +55,21 @@ describe('toFacelets', () => {
     }
   });
 
+  it('solves slice-mixed states back to uniform faces', () => {
+    // Middle-layer turns permute face centres. The two-phase solver ignores
+    // centres and restores each face to the colour now sitting at its centre,
+    // which is exactly what the model calls solved (invariant 5).
+    for (const sequence of ['M', 'E2', "S'", 'M E S', "R M U M'"]) {
+      const state = new CubeState();
+      state.applyMoves(parseMoves(sequence));
+      expect(state.isSolved()).toBe(false);
+      const solution = min2phase.solve(toFacelets(state));
+      expect(isSolverError(solution)).toBe(false);
+      state.applyMoves(solutionToMoves(solution));
+      expect(state.isSolved()).toBe(true);
+    }
+  });
+
   it('cross-checks our projection against fromScramble on the same history', () => {
     const rng = mulberry32(913);
     const scramble = generateScramble(15, rng);

@@ -17,6 +17,60 @@ export interface MoveLike {
 }
 
 export const FACE_LETTERS = ['U', 'D', 'L', 'R', 'F', 'B'];
+export const SLICE_LETTERS = ['M', 'E', 'S'];
+export const MOVE_FACES = [...FACE_LETTERS, ...SLICE_LETTERS];
+
+/**
+ * Client-space position of a sticker's centre, projected through the live
+ * camera. Lets a test aim a drag at a specific sticker (e.g. the F centre)
+ * instead of hoping a fixed viewport point lands on it. The cubelet's own
+ * centre is not enough: the sticker floats ~0.48 in front of it, which is a
+ * large perspective offset at this camera distance.
+ */
+export async function stickerScreenPoint(
+  page: Page,
+  home: [number, number, number],
+): Promise<{ x: number; y: number }> {
+  return page.evaluate((homePos) => {
+    interface Point3 {
+      x: number;
+      y: number;
+      clone(): Point3;
+      project(camera: unknown): Point3;
+    }
+    interface Node3 {
+      children: Node3[];
+      userData: { cubeletId?: number; stickerIndex?: number };
+      position: Point3;
+      getWorldPosition(target: Point3): Point3;
+    }
+    const seam = (
+      window as unknown as {
+        __cube3: {
+          scene: { camera: unknown; renderer: { domElement: HTMLCanvasElement } };
+          controller: {
+            state: { all(): { id: number; home: readonly number[] }[] };
+            renderer: { object: Node3 & { getObjectByName(name: string): Node3 | null } };
+          };
+        };
+      }
+    ).__cube3;
+    const cubie = seam.controller.state.all().find((c) =>
+      c.home.every((value, index) => value === homePos[index]),
+    );
+    if (!cubie) throw new Error(`cubelet ${homePos.join(',')} not found`);
+    const group = seam.controller.renderer.object.getObjectByName(`cubelet-${cubie.id}`);
+    const sticker = group?.children.find((child) => child.userData.stickerIndex !== undefined);
+    if (!sticker) throw new Error(`cubelet ${homePos.join(',')} has no sticker`);
+    const world = sticker.getWorldPosition(sticker.position.clone());
+    const ndc = world.project(seam.scene.camera);
+    const rect = seam.scene.renderer.domElement.getBoundingClientRect();
+    return {
+      x: rect.left + ((ndc.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - ndc.y) / 2) * rect.height,
+    };
+  }, home);
+}
 
 export async function gotoCube(page: Page): Promise<void> {
   await page.goto('/');

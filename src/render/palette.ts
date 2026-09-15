@@ -1,4 +1,4 @@
-export { CUBE_COLORS, FACE_AXES, FACE_NAMES, COLOR_NAMES } from '../cube/palette';
+export { CUBE_COLORS, MOVE_AXES, FACE_NAMES, COLOR_NAMES } from '../cube/palette';
 
 /** Very dark near-black plastic for the cubelet bodies. */
 export const BODY_COLOR = '#131316';
