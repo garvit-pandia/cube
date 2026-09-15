@@ -20,6 +20,7 @@ import type { MoveFace } from './cube/types';
 import { FACE_LETTERS, MOVE_FACES, SLICE_LETTERS } from './cube/types';
 import { PointerTurnHandler } from './render/PointerTurnHandler';
 import { SceneManager } from './render/SceneManager';
+import { SoundRig } from './render/SoundRig';
 import { formatTime } from './session/SolveSession';
 
 const MOVE_VARIANTS: readonly { suffix: string; turns: 1 | 2 | 3; title: string }[] = [
@@ -85,6 +86,7 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<CubeController | null>(null);
   const sceneRef = useRef<SceneManager | null>(null);
+  const soundRef = useRef<SoundRig | null>(null);
   const historyRef = useRef<HTMLOListElement>(null);
   const logTabsRef = useRef<HTMLDivElement>(null);
   const solvingRef = useRef(false);
@@ -100,6 +102,13 @@ export default function App() {
   );
   const [logTab, setLogTab] = useState<LogTab>('scramble');
 
+  // The sound rig reads this at call time, so toggling the setting in the
+  // panel takes effect without re-creating the rig.
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -111,6 +120,15 @@ export default function App() {
     controller.attach(scene);
     const unsubscribe = controller.subscribe(setSnapshot);
     setSnapshot(controller.snapshot());
+
+    // Audio must be created inside a user gesture; the rig is idempotent and
+    // stays silent until then. Capture phase on window is required: sticker
+    // clicks stop propagation in the container's capture phase, so a
+    // bubble-phase window listener would never see them.
+    const sound = new SoundRig(() => settingsRef.current.sound);
+    soundRef.current = sound;
+    const unlockSound = () => sound.unlock();
+    window.addEventListener('pointerdown', unlockSound, { once: true, capture: true });
 
     // Sticker drags become face or slice turns; background drags stay orbit.
     const pointerTurn = new PointerTurnHandler(scene, {
@@ -144,6 +162,9 @@ export default function App() {
       cancelAnimationFrame(firstFrame);
       cancelAnimationFrame(secondFrame);
       setSceneReady(false);
+      window.removeEventListener('pointerdown', unlockSound, true);
+      sound.dispose();
+      soundRef.current = null;
       pointerTurn.dispose();
       unsubscribe();
       scene.dispose();
@@ -177,6 +198,7 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      soundRef.current?.unlock();
       if (solvingRef.current) return;
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
@@ -227,6 +249,29 @@ export default function App() {
   useEffect(() => {
     solvingRef.current = solving;
   }, [solving]);
+
+  // Sound observations: the controller stays sound-agnostic; App watches the
+  // snapshot streams that every turn source feeds.
+  const playedSoundRef = useRef({ history: 0, solveDone: 0 });
+  useEffect(() => {
+    const playedHistory = snapshot?.history.length ?? 0;
+    const playedSolveDone = snapshot?.solveDone ?? 0;
+    const previous = playedSoundRef.current;
+    if (playedHistory > previous.history) soundRef.current?.click(0.7);
+    else if (playedSolveDone > previous.solveDone) soundRef.current?.click(0.45);
+    playedSoundRef.current = { history: playedHistory, solveDone: playedSolveDone };
+  }, [snapshot]);
+
+  const scrambleSoundRef = useRef(0);
+  useEffect(() => {
+    const scrambleLength = snapshot?.scramble.length ?? 0;
+    if (scrambleSoundRef.current === 0 && scrambleLength > 0) soundRef.current?.whoosh();
+    scrambleSoundRef.current = scrambleLength;
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (justSolved) soundRef.current?.chime();
+  }, [justSolved]);
 
   // Roving focus for the log tab row: arrows move both selection and focus,
   // per the ARIA tabs pattern.
