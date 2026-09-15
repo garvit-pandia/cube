@@ -43,6 +43,153 @@ export class CubeRenderer {
   private stickerGeometry: RoundedBoxGeometry | null = null;
   private overridden: number[] = [];
 
+  /** Exploded-view amount: 0 assembled, 1 fully spread. */
+  private explode = 0;
+  private explodeTarget = 0;
+  private intro: {
+    offsets: Map<number, { pos: THREE.Vector3; quat: THREE.Quaternion; delay: number }>;
+    elapsed: number;
+    duration: number;
+  } | null = null;
+  private unregisterFrame: (() => void) | null = null;
+  /** Frame-hook source: the renderer borrows SceneManager's loop via this. */
+  private frameSource: {
+    registerFrameHook(fn: (delta: number, elapsed: number) => void): () => void;
+  } | null = null;
+  private readonly tmpDir = new THREE.Vector3();
+  private readonly tmpPos = new THREE.Vector3();
+  private readonly tmpQuat = new THREE.Quaternion();
+  private static readonly IDENTITY_QUAT = new THREE.Quaternion();
+
+  /**
+   * Provide the frame loop the explode/intro tween runs on (the SceneManager).
+   * Called once by App after attach; build() registers the hook from this.
+   */
+  setFrameSource(
+    source: {
+      registerFrameHook(fn: (delta: number, elapsed: number) => void): () => void;
+    } | null,
+  ): void {
+    this.frameSource = source;
+    if (!source) this.unregisterTick();
+    else this.ensureTick();
+  }
+
+  /** Exploded-view amount: 0 assembled, 1 fully spread. */
+  setExplode(target: number, immediate = false): void {
+    this.explodeTarget = Math.min(Math.max(target, 0), 1);
+    if (immediate) {
+      this.explode = this.explodeTarget;
+      this.reapplyAll();
+    }
+    this.ensureTick();
+  }
+
+  /**
+   * One-time assembly animation: cubelets fly in from a scattered shell.
+   * Scatter positions sit <= 3.3 units from the centre on purpose — the
+   * key-light shadow frustum is +/-3.4, so nothing pops out of shadow mid-intro.
+   */
+  beginIntro(duration = 1.2): void {
+    const offsets = new Map<
+      number,
+      { pos: THREE.Vector3; quat: THREE.Quaternion; delay: number }
+    >();
+    for (const [id, slot] of this.slots) {
+      const length = slot.basePosition.length();
+      if (length < 1e-6) continue; // core cubie: nowhere to scatter from
+      const dir = slot.basePosition.clone().normalize();
+      const pos = dir.clone().multiplyScalar(2.5 + Math.random() * 0.8);
+      const quat = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+        ),
+      );
+      const delay = 0.15 * (1 - dir.y) + Math.random() * 0.1;
+      offsets.set(id, { pos, quat, delay });
+    }
+    this.intro = { offsets, elapsed: 0, duration };
+    this.ensureTick();
+    this.reapplyAll();
+  }
+
+  private ensureTick(): void {
+    if (this.unregisterFrame || !this.frameSource) return;
+    const source = this.frameSource;
+    this.unregisterFrame = source.registerFrameHook((delta) => this.tickFrame(delta));
+  }
+
+  private unregisterTick(): void {
+    this.unregisterFrame?.();
+    this.unregisterFrame = null;
+  }
+
+  private tickFrame(delta: number): void {
+    let dirty = false;
+    if (this.explode !== this.explodeTarget) {
+      const next =
+        this.explode + (this.explodeTarget - this.explode) * Math.min(1, delta * 6);
+      this.explode = Math.abs(this.explodeTarget - next) < 0.001 ? this.explodeTarget : next;
+      dirty = true;
+    }
+    const intro = this.intro;
+    if (intro) {
+      intro.elapsed += delta;
+      let done = true;
+      for (const offset of intro.offsets.values()) {
+        if ((intro.elapsed - offset.delay) / intro.duration < 1) {
+          done = false;
+          break;
+        }
+      }
+      if (done) this.intro = null;
+      dirty = true;
+    }
+    if (dirty) this.reapplyAll();
+  }
+
+  /** Re-derive every settled cubelet's group transform from its base. */
+  private reapplyAll(): void {
+    for (const [id, slot] of this.slots) {
+      // In-flight turns re-apply on their next animation frame instead.
+      if (this.overridden.includes(id)) continue;
+      slot.group.position.copy(slot.basePosition);
+      slot.group.quaternion.copy(slot.baseQuaternion);
+      this.applyVisualOffset(id, slot);
+    }
+  }
+
+  /**
+   * Compose derived visual offsets onto a group whose base (or rotated-base)
+   * transform the caller has just copied. Explode pushes along the direction
+   * of the already-rotated position — so a turning layer spreads while it
+   * turns, which reads better than freezing the offset axis mid-turn — and
+   * the intro lerps from its scatter pose onto that exploded target.
+   * `basePosition`/`baseQuaternion` are never written here.
+   */
+  private applyVisualOffset(id: number, slot: Slot): void {
+    const group = slot.group;
+    if (this.explode !== 0) {
+      this.tmpDir.copy(group.position);
+      if (this.tmpDir.lengthSq() > 1e-12) {
+        group.position.addScaledVector(this.tmpDir.normalize(), this.explode * 1.4);
+      }
+    }
+    const intro = this.intro;
+    if (!intro) return;
+    const offset = intro.offsets.get(id);
+    if (!offset) return;
+    const t = Math.min(Math.max((intro.elapsed - offset.delay) / intro.duration, 0), 1);
+    if (t >= 1) return;
+    const eased = 1 - Math.pow(1 - t, 3);
+    this.tmpPos.copy(group.position);
+    group.position.lerpVectors(offset.pos, this.tmpPos, eased);
+    this.tmpQuat.copy(offset.quat).slerp(CubeRenderer.IDENTITY_QUAT, eased);
+    group.quaternion.premultiply(this.tmpQuat);
+  }
+
   private static readMatrix(rotation: readonly number[], target: THREE.Matrix4): THREE.Matrix4 {
     return target.set(
       rotation[0], rotation[1], rotation[2], 0,
@@ -104,6 +251,7 @@ export class CubeRenderer {
     }
 
     this.sync(cubelets, matrix);
+    this.ensureTick();
   }
 
   /** Snap every cubelet to the exact transform implied by the logical state. */
@@ -121,6 +269,7 @@ export class CubeRenderer {
       slot.baseQuaternion.setFromRotationMatrix(matrix);
       slot.group.position.copy(slot.basePosition);
       slot.group.quaternion.copy(slot.baseQuaternion);
+      this.applyVisualOffset(cubelet.id, slot);
     }
     this.overridden = [];
   }
@@ -138,6 +287,7 @@ export class CubeRenderer {
       if (!slot) continue;
       slot.group.position.copy(slot.basePosition).applyQuaternion(rotation);
       slot.group.quaternion.copy(rotation).multiply(slot.baseQuaternion);
+      this.applyVisualOffset(id, slot);
       this.overridden.push(id);
     }
   }
@@ -148,6 +298,7 @@ export class CubeRenderer {
       if (!slot) continue;
       slot.group.position.copy(slot.basePosition);
       slot.group.quaternion.copy(slot.baseQuaternion);
+      this.applyVisualOffset(id, slot);
     }
     this.overridden = [];
   }
@@ -167,6 +318,8 @@ export class CubeRenderer {
   }
 
   private clear(): void {
+    this.unregisterTick();
+    this.intro = null;
     for (const slot of this.slots.values()) this.object.remove(slot.group);
     this.slots.clear();
     this.cubeletIds.length = 0;
@@ -180,6 +333,11 @@ export class CubeRenderer {
   }
 
   dispose(): void {
+    this.unregisterTick();
+    this.frameSource = null;
+    this.intro = null;
+    this.explode = 0;
+    this.explodeTarget = 0;
     this.clear();
     this.object.removeFromParent();
   }

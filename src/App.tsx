@@ -101,6 +101,8 @@ export default function App() {
     loadSidebarOpen(typeof window === 'undefined' ? null : safeStorage()),
   );
   const [logTab, setLogTab] = useState<LogTab>('scramble');
+  const [explodeOn, setExplodeOn] = useState(false);
+  const introPlayedRef = useRef(false);
 
   // The sound rig reads this at call time, so toggling the setting in the
   // panel takes effect without re-creating the rig.
@@ -118,6 +120,7 @@ export default function App() {
     setOsReducedMotion(prefersReducedMotion());
 
     controller.attach(scene);
+    controller.renderer.setFrameSource(scene);
     const unsubscribe = controller.subscribe(setSnapshot);
     setSnapshot(controller.snapshot());
 
@@ -167,9 +170,9 @@ export default function App() {
       soundRef.current = null;
       pointerTurn.dispose();
       unsubscribe();
+      controller.renderer.setFrameSource(null);
       scene.dispose();
       controller.renderer.dispose();
-      sceneRef.current = null;
       controllerRef.current = null;
     };
   }, []);
@@ -183,6 +186,16 @@ export default function App() {
     if (!controller) return;
     controller.animationScale = reducedMotion ? 0.001 : animationScaleFor(settings);
   }, [settings, reducedMotion]);
+
+  // One-time assembly flight: skipped when motion is reduced or instant so
+  // the cube just appears. Guarded for StrictMode's double-mount.
+  useEffect(() => {
+    if (!sceneReady || introPlayedRef.current) return;
+    introPlayedRef.current = true;
+    if (!reducedMotion && settings.animationSpeed !== 'instant') {
+      controllerRef.current?.renderer.beginIntro(1.2);
+    }
+  }, [sceneReady, reducedMotion, settings.animationSpeed]);
 
   useEffect(() => {
     saveSettings(safeStorage(), settings);
@@ -538,6 +551,18 @@ export default function App() {
               onClick={() => sceneRef.current?.resetView(reducedMotion)}
             >
               Reset view
+            </button>
+            <button
+              type="button"
+              className="btn"
+              aria-pressed={explodeOn}
+              onClick={() => {
+                const next = !explodeOn;
+                setExplodeOn(next);
+                controller?.renderer.setExplode(next ? 1 : 0, reducedMotion);
+              }}
+            >
+              Exploded
             </button>
             <button type="button" className="btn btn-danger" onClick={() => controller?.reset()}>
               Reset cube
