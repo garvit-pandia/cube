@@ -58,9 +58,34 @@ ENVIRONMENT FACTS & GOTCHAS (verified this session; also in SHOWCASE-PLAN.md sec
 END STATE (definition of done):
 - M3..M9 all committed in order with the exact messages above; git log shows the full sequence after b9c8b43; working tree clean (nothing modified, nothing untracked except nothing).
 - npx tsc -b, npm run lint, npm run test, npm run test:e2e all green at final HEAD.
-- Screenshots in /tmp/opencode/cube3-design/: before/A/B (M3), exploded state (M4), celebration mid-burst (M5), demo in progress (M7).
-- Final report message must include: per-milestone commit hashes, the M3 A/B verdict and why, the manual QA findings you could verify locally (demo >=3 loops unattended with no console errors, reduced-motion pass, 10-minute demo memory/console check if feasible, capture matrix with Chrome verified + Firefox/Android marked untested in this environment), and any milestone that was stopped with the reason.
+- Screenshots in /tmp/opencode/cube3-design/: before/A/B (M3), exploded state (M4), celebration mid-burst (M5), demo in progress (M7), plus one per polish round (below).
+- Final report message must include: per-milestone commit hashes, the M3 A/B verdict and why, the polish-round table (round -> score -> what changed), the manual QA findings you could verify locally (demo >=3 loops unattended with no console errors, reduced-motion pass, 10-minute demo memory/console check if feasible, capture matrix with Chrome verified + Firefox/Android marked untested in this environment), and any milestone that was stopped with the reason.
 - Do NOT git push. Do NOT create PRs. Do NOT modify this GOAL-PROMPT.md or delete SHOWCASE-PLAN.md.
+
+FINAL PHASE — CRITIQUE LOOP, VISUAL POLISH & FULL QA (runs after the M9 commit; this phase is MANDATORY, not optional):
+
+Rounds. Each round is:
+  1. Capture a fresh screenshot set at 1440x900 @2x (and one at 390x844 for mobile) into /tmp/opencode/cube3-design/round-<N>-*.png: idle cube, mid-demo with cinema camera, exploded state, celebration mid-burst, and the panel/UI in focus.
+  2. Spawn a CRITIQUE SUBAGENT (fresh context; in this harness use the vision subagent for anything visual — the main model cannot see images). Give it every screenshot plus this rating brief: rate the work out of 10 strictly on visuals, aesthetics and looks — 3D scene quality (sticker material, lighting, shadow, framing), UI panel craft (typography, spacing, hierarchy, consistency with the existing dark-Swiss identity), motion/interaction polish, cohesion between 3D scene and UI, and an explicit "does anything look AI-generated / template slop?" check. Demand concrete, actionable, ranked feedback — not vague praise.
+  3. Apply the top feedback. Allowed surface: render constants (palette.ts, SceneManager lighting/exposure/env only — PCFShadowMap, shadow.radius and the shadow frustum stay untouched), index.css, App.tsx markup/Copy-free structure, and render-layer rigs. Still forbidden: everything on the do-not-touch list (tsconfig.json, src/cube/*, src/session/*, min2phase.js), no new npm dependencies, no postprocessing/bloom, no replacement of the established dark-Swiss design language with a template look.
+  4. Full verification (npx tsc -b && npm run lint && npm run test && npm run test:e2e) — all green or the round does not count.
+  5. Commit the round as: style: visual polish round <N> — <short focus>. Never amend or rebase earlier commits.
+
+Loop rules:
+- A score below 8/10 means the loop CONTINUES after that round, regardless of round count.
+- Even if a round scores 8/10 or higher, keep going: at least 5 improvement rounds happen no matter what the scores are.
+- Hard safety cap: 12 rounds total (protects the machine overnight; reaching >= 8/10 is the goal, the cap only exists so the loop cannot run forever). If round 12 ends below 8/10, stop, keep the best-scoring state committed, and report the final score honestly with the remaining critique feedback.
+- Each round must be a real, visible improvement (material/lighting/typography/motion/detail work), not a no-op re-screenshot. If the critique says 9+/10 with no actionable feedback, spend the remaining rounds on depth passes instead: micro-interactions, easing curves, hover/focus states, edge-case framing (very narrow/wide viewports), texture of the floor/backdrop, stamp and progress-bar detail.
+
+Research & taste (use as needed, any round):
+- Research current award-winning site standards (Awwwards-style criteria: typography scale and rhythm, restrained palette, purposeful motion, one clear idea) and three.js showcase-quality scenes before making taste calls; cite in the report which references informed each round.
+- Load any available design skills if the environment offers them (frontend-design, design-taste-frontend, web-design-guidelines or equivalents) and follow them.
+- Anti-slop guardrails: no default purple/blue gradient landing-page energy, no emoji as UI, no decorative glassmorphism blobs, no inconsistent radii/shadows, no centering-everything, no stock font stacks that fight the existing identity. Refine what is there; the cube is the hero.
+- Take creative decisions yourself when needed and record them (decision + why) in the final report. The user is asleep; there is no one to ask.
+
+FULL UX & FEATURE QA PASS (after the loop's final round, before the report):
+- Drive every feature in a real browser through window.__cube3 and the UI, at desktop (1440x900) and mobile (390x844): manual face/slice buttons, keyboard turns incl. Shift-reverse, sticker drags on faces AND face-centres (M/E/S), background orbit, scroll zoom, Undo/Redo, Scramble, Replay, Optimal solve, Cancel mid-solve, Reset view, Reset cube, Exploded toggle (turns while exploded, toggle back), intro on fresh load, sound on/off instant effect, celebration stamp + particles (and instant stamp under reduced motion), Demo loop >= 3 cycles with cinema camera + stage-tap stop + action-button stop, ?demo=1 autostart, Record start/stop/download (chromium), settings persistence across reload, reduced-motion pass (OS flag or force toggle), log tabs keyboard navigation.
+- Zero console errors throughout. Anything broken: fix it (same allowed surface and verification rules as a polish round), commit the fix as fix: <what>, and note it in the report.
 ```
 
 ## Notes for the human (not part of the prompt)
@@ -69,5 +94,11 @@ END STATE (definition of done):
   overnight session sees it even after a fresh clone.
 - The M3 candidate-A edits are intentionally left uncommitted in the working
   tree — the prompt explains them; do not stash/revert before starting.
+- The critique loop runs **after** M9: vision critique rates every round out
+  of 10, < 8/10 keeps the loop going, and **at least 5 rounds happen even if
+  the score is already ≥ 8/10** (hard cap 12 rounds so the machine survives
+  the night). Expect extra `style: visual polish round N` commits and possible
+  `fix:` commits from the end-to-end UX pass on top of the nine milestone
+  commits — review them in the morning and drop any you dislike.
 - In the morning: review `git log`, run the verification once, then
   `git push` manually when satisfied (that is what deploys to Pages).
