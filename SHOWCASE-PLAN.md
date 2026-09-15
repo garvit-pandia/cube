@@ -6,7 +6,10 @@ that produced it. Follow milestones **in order**; each one is independently
 shippable and must end green. Do not redesign the plan; if something is
 impossible as written, stop and tell the user what conflicts.
 
-Status: **PLANNING ONLY — no milestone has been started.**
+Status: **IN PROGRESS — M1 + M2 committed, M3 half-applied in the working tree.**
+See "Progress log & overnight handoff" at the bottom of this file before
+touching anything; it records the exact commit hashes, the dirty-tree state,
+the locked user decisions, and environment gotchas discovered on the way.
 
 ---
 
@@ -754,3 +757,62 @@ export class CaptureManager {
 Bloom/postprocessing · smart-cube Bluetooth (cubing.js — separate track) ·
 other puzzle sizes · cloud sync/accounts · new npm dependencies · changes to
 `src/cube/*` or `src/session/*`.
+
+---
+
+## 6. Progress log & overnight handoff (updated live; read first)
+
+| Milestone | State | Commit |
+|---|---|---|
+| M1 frame hooks + `sound` setting | ✅ done, verified green | `6b46466` |
+| M2 SoundRig | ✅ done, verified green | `b9c8b43` |
+| M3 premium look pass | 🔶 half-applied (see below) | — |
+| M4–M9 | ⬜ not started | — |
+
+### M3 dirty-tree state (intentional, do not revert)
+
+- `src/render/palette.ts` + `src/render/SceneManager.ts` carry **candidate A**
+  (stickers `clearcoat 1.0` / `clearcoatRoughness 0.08` / `roughness 0.24`,
+  body `roughness 0.55`, `environmentIntensity 0.7`) — uncommitted, per the
+  M3 procedure. `before.png` is already saved.
+- `src/App.tsx` carries the **temporary DEV-only `?ab` camera lock**. It must
+  be **deleted before the M3 commit**.
+- Screenshots dir: `/tmp/opencode/cube3-design/` (`before.png`,
+  `screenshot.mjs` — the 1440×900 @2x Playwright shot helper, run as
+  `node /tmp/opencode/cube3-design/screenshot.mjs <name>` from the repo root;
+  it loads `http://localhost:5179/?ab`, waits for `.viewport.is-ready` +1.5 s).
+- Remaining M3 steps: shot `A` → apply candidate B (A + `envMapIntensity 1.15`
+  on `STICKER_MATERIAL`, `toneMappingExposure 1.0`) → shot `B` → pick per the
+  §M3 rule (B unless highlights blow out; judge via the vision subagent, the
+  main model cannot see images) → **remove `?ab` code** → full verification →
+  commit `style(render): premium sticker and environment tuning`. If the
+  winner is A, revert the B-only extras (`envMapIntensity`, exposure) but keep
+  the A set. If the winner is B, keep everything.
+
+### Locked user decisions (2026-09-15, do not re-ask)
+
+1. **M3 A/B pick:** plan-default rule — B unless stickers blow out, judged
+   from the screenshots (vision subagent), no user review overnight.
+2. **No push:** all commits stay **local on main**. Pushing triggers the
+   GitHub Pages deploy; the user reviews and pushes in the morning.
+3. **Manual QA findings** (demo ≥3 loops, reduced-motion pass, capture matrix
+   incl. "Firefox/Android untested here") go into the **final report message
+   only** — no QA file in the repo.
+
+### Gotchas discovered this session (verified)
+
+- **Capture-phase clicks:** `PointerTurnHandler` calls
+  `event.stopPropagation()` in the container's **capture** phase
+  (`PointerTurnHandler.ts:61,94`), so window **bubble**-phase listeners never
+  see canvas clicks. Any window-level `pointerdown` wiring (sound unlock,
+  demo stop) must register with `{ capture: true }` and remove with the same
+  flag. M2's unlock already does this (`App.tsx`).
+- **Headless timing:** software WebGL renders slowly; a fixed 600 ms wait is
+  not enough for a turn's completing snapshot. Always wait for
+  `controller.snapshot().busy === false`, then a ~800 ms beat for React
+  effects.
+- **Stale-module curl check:** esbuild **minifies** dev-served modules — grep
+  minified shapes (`clearcoat: 1`, `environmentIntensity = .7`), not the
+  source text (`1.0`, `0.7`).
+- **Dev server:** already running on 5179 (cube3's own row) — reuse it, never
+  kill; e2e reuses it too.
