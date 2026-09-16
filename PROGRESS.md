@@ -2,7 +2,20 @@
 
 Live state for the overnight session. Read this before touching anything.
 
-Last updated: polish round 1 committed; UX QA complete; final verification green.
+Last updated: polish round 1 + QA committed; report page and dev app served for manual testing.
+
+## Live URLs (for manual testing)
+
+| URL | What | Owner / notes |
+|---|---|---|
+| **http://localhost:5179/** | **The cube3 app itself** — this is the thing to test | cube3's own pinned `strictPort` dev server (`node` pid 56546, started before this session). Already running; do **not** kill or restart it. Add `?demo=1` to autostart the self-solving demo. |
+| **http://localhost:5180/** | Session report page (what was built, hashes, measurements, QA) | Ephemeral `node /tmp/opencode/cube3-report/serve.mjs`, process name `cube3-report` (hub). Repo-external: reads `/tmp/opencode/cube3-report/report.html` and serves screenshots from `/tmp/opencode/cube3-design/` under `/shots/`. 5180 was verified free before binding; it is **not** a claimed row in `PORT-REGISTRY.md` — stop it when done. |
+
+Verified live: 5179 boots clean (`.viewport.is-ready`, `window.__cube3` present,
+`phase: idle`, `solved: true`, 10 action buttons + 27 move buttons,
+**0 page errors**); 5179 serves current code (the polish-round-1
+`setContentScale` symbol is present in both `SceneManager.ts` and `App.tsx`,
+so it is not serving stale modules).
 
 ## Committed (all LOCAL on main — never pushed)
 
@@ -19,6 +32,7 @@ Last updated: polish round 1 committed; UX QA complete; final verification green
 | M9 docs (AGENTS.md + README.md) | done, verified green | `13e844a` |
 | Polish round 1 (scene/framing/toggles) | done, verified green | `75c62a6` |
 | e2e budgets derived from measurement | done, verified green | `5fba5c4` |
+| Progress notes (polish + QA results) | done | `072b2ee` |
 
 Nothing pushed (`main` is ahead of `origin/main` only; pushing deploys Pages).
 
@@ -113,6 +127,14 @@ capture matrix (chromium verified).
 
 ## Environment notes
 
+- **Ports:** before binding or killing anything, read `../PORT-REGISTRY.md` AND
+  run `ss -ltnp`. 5179 (cube3 dev) and 5180 (this report) are live; 9222
+  (Playwright chromium) and 46537 (vscode-server) are never killable.
+- **The `browser.*` eval helpers can fail on cleanup** with
+  `Failed to clear browser request interception after browser.run`. That is a
+  harness bug, not an app bug — fall back to a throwaway Playwright script run
+  from the repo root (`node ./.probe.tmp.mjs`, then delete it) so `@playwright/test`
+  resolves out of `node_modules`.
 - Load average on this box is dominated by vscode-server (~10). Screenshot
   probes that boot a second chromium take 30 s+ and often time out; run one
   browser at a time and expect the app to need ~10–30 s to reach scene-ready.
