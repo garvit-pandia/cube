@@ -7,6 +7,13 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Throwaway Playwright probes (run from the repo root as node ./*.tmp.mjs,
+# then delete; automated checks belong in e2e/*.e2e.ts instead)
+*.tmp.mjs
+
+# Local scratch (ad-hoc notes, launch-thread pages)
+thread.local/
+
 node_modules
 dist
 dist-ssr
