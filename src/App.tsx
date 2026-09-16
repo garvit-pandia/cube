@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 import { CubeController, type CubeSnapshot } from './app/CubeController';
+import { DemoLoop } from './app/DemoLoop';
 import {
   DEFAULT_SETTINGS,
   animationScaleFor,
@@ -106,6 +107,8 @@ export default function App() {
   );
   const [logTab, setLogTab] = useState<LogTab>('scramble');
   const [explodeOn, setExplodeOn] = useState(false);
+  const [demoOn, setDemoOn] = useState(false);
+  const demoLoopRef = useRef<DemoLoop | null>(null);
   const introPlayedRef = useRef(false);
 
   // The sound rig reads this at call time, so toggling the setting in the
@@ -148,6 +151,10 @@ export default function App() {
     });
     cinemaRef.current = cinema;
 
+    // Self-solving demo loop (pure state machine; App owns the wiring).
+    const demoLoop = new DemoLoop(controller);
+    demoLoopRef.current = demoLoop;
+
     // Sticker drags become face or slice turns; background drags stay orbit.
     const pointerTurn = new PointerTurnHandler(scene, {
       stickerInfo: (cubeletId, stickerIndex) => controller.stickerInfo(cubeletId, stickerIndex),
@@ -187,6 +194,8 @@ export default function App() {
       celebrationRef.current = null;
       cinema.dispose();
       cinemaRef.current = null;
+      demoLoop.stop();
+      demoLoopRef.current = null;
       pointerTurn.dispose();
       unsubscribe();
       controller.renderer.setFrameSource(null);
@@ -208,14 +217,30 @@ export default function App() {
   }, [settings, reducedMotion]);
 
   // One-time assembly flight: skipped when motion is reduced or instant so
-  // the cube just appears. Guarded for StrictMode's double-mount.
+  // the cube just appears. Guarded for StrictMode's double-mount. A demo
+  // autostart (?demo=1) skips the intro so the loop begins on a clean cube.
   useEffect(() => {
     if (!sceneReady || introPlayedRef.current) return;
     introPlayedRef.current = true;
+    const autostart =
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('demo') === '1';
+    if (autostart) return;
     if (!reducedMotion && settings.animationSpeed !== 'instant') {
       controllerRef.current?.renderer.beginIntro(1.2);
     }
   }, [sceneReady, reducedMotion, settings.animationSpeed]);
+
+  // ?demo=1 autostarts once scene-ready (after the intro decision above).
+  useEffect(() => {
+    if (!sceneReady) return;
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('demo') !== '1') return;
+    if (demoLoopRef.current?.state !== 'off') return;
+    demoLoopRef.current?.start();
+    cinemaRef.current?.setActive(true);
+    setDemoOn(true);
+  }, [sceneReady]);
 
   useEffect(() => {
     saveSettings(safeStorage(), settings);
@@ -225,9 +250,21 @@ export default function App() {
     saveSidebarOpen(safeStorage(), sidebarOpen);
   }, [sidebarOpen]);
 
-  const playMove = useCallback((face: MoveFace, turns: 1 | 2 | 3) => {
-    controllerRef.current?.enqueue({ face, turns });
+  const stopDemo = useCallback(() => {
+    const loop = demoLoopRef.current;
+    if (!loop || loop.state === 'off') return;
+    loop.stop();
+    cinemaRef.current?.setActive(false);
+    setDemoOn(false);
   }, []);
+
+  const playMove = useCallback(
+    (face: MoveFace, turns: 1 | 2 | 3) => {
+      stopDemo();
+      controllerRef.current?.enqueue({ face, turns });
+    },
+    [stopDemo],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -241,12 +278,25 @@ export default function App() {
       const key = event.key.toUpperCase();
       if (!MOVE_FACES.includes(key as MoveFace)) return;
       event.preventDefault();
-      playMove(key as MoveFace, event.shiftKey ? 3 : 1);
+      // Move keys behave exactly like the on-screen pads: they stop demo.
+      stopDemo();
+      controllerRef.current?.enqueue({ face: key as MoveFace, turns: event.shiftKey ? 3 : 1 });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [playMove]);
+  }, [stopDemo]);
 
+  // Stage tap stops the demo. Capture phase is required: sticker clicks
+  // stop propagation in the container's capture phase, so a bubble-phase
+  // listener would never see them.
+  useEffect(() => {
+    if (!demoOn) return;
+    const stage = containerRef.current?.closest('main.stage');
+    if (!stage) return;
+    const onStagePointerDown = () => stopDemo();
+    stage.addEventListener('pointerdown', onStagePointerDown, { capture: true });
+    return () => stage.removeEventListener('pointerdown', onStagePointerDown, { capture: true });
+  }, [demoOn, stopDemo, sceneReady]);
   // The stored snapshot only lands on turn boundaries; while the clock is
   // running the display reads the controller each frame.
   const phase = snapshot?.phase ?? 'idle';
@@ -296,11 +346,19 @@ export default function App() {
   }, [snapshot]);
 
   const scrambleSoundRef = useRef(0);
+  const scrambleContentRef = useRef('');
   useEffect(() => {
     const scrambleLength = snapshot?.scramble.length ?? 0;
+    const content = snapshot ? formatSequence(snapshot.scramble) : '';
     if (scrambleSoundRef.current === 0 && scrambleLength > 0) soundRef.current?.whoosh();
+    else if (content !== scrambleContentRef.current && scrambleLength > 0 && demoOn) {
+      // Demo cycles 2+ would otherwise be silent until the chime: the length
+      // never returns to 0 between loops, so retrigger on content change.
+      soundRef.current?.whoosh();
+    }
     scrambleSoundRef.current = scrambleLength;
-  }, [snapshot]);
+    scrambleContentRef.current = content;
+  }, [snapshot, demoOn]);
 
   useEffect(() => {
     if (!justSolved) return;
@@ -468,8 +526,8 @@ export default function App() {
       <section className="panel" id="controls-panel" aria-label="Cube controls">
         <div className="hero-timer">
           <div className="hero-meta">
-            <span>{PHASE_LABEL[phase]}</span>
-            {phase === 'running' && (
+            <span>{demoOn ? 'Demo' : PHASE_LABEL[phase]}</span>
+            {phase === 'running' && !demoOn && (
               <span className="hero-run" aria-hidden="true">
                 Running
               </span>
@@ -526,7 +584,10 @@ export default function App() {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => controller?.solveOptimally()}
+              onClick={() => {
+                stopDemo();
+                void controller?.solveOptimally();
+              }}
               disabled={!snapshot?.canSolveOptimally}
             >
               Optimal solve
@@ -534,7 +595,10 @@ export default function App() {
             <button
               type="button"
               className="btn"
-              onClick={() => void controller?.scrambleOptimally()}
+              onClick={() => {
+                stopDemo();
+                void controller?.scrambleOptimally();
+              }}
               disabled={solving}
             >
               Scramble
@@ -542,10 +606,32 @@ export default function App() {
             <button
               type="button"
               className={`btn${solving ? ' btn-danger' : ''}`}
-              onClick={() => (solving ? controller?.cancelSolve() : controller?.solve())}
+              onClick={() => {
+                if (solving) controller?.cancelSolve();
+                else {
+                  stopDemo();
+                  controller?.solve();
+                }
+              }}
               disabled={!solving && !snapshot?.canSolve}
             >
               {solving ? 'Cancel' : 'Replay'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              aria-pressed={demoOn}
+              onClick={() => {
+                if (demoOn) {
+                  stopDemo();
+                  return;
+                }
+                demoLoopRef.current?.start();
+                cinemaRef.current?.setActive(true);
+                setDemoOn(true);
+              }}
+            >
+              Demo
             </button>
           </div>
           <div className="action-group">
@@ -553,7 +639,10 @@ export default function App() {
             <button
               type="button"
               className="btn"
-              onClick={() => controller?.undo()}
+              onClick={() => {
+                stopDemo();
+                controller?.undo();
+              }}
               disabled={solving || !snapshot?.canUndo}
             >
               Undo
@@ -561,7 +650,10 @@ export default function App() {
             <button
               type="button"
               className="btn"
-              onClick={() => controller?.redo()}
+              onClick={() => {
+                stopDemo();
+                controller?.redo();
+              }}
               disabled={solving || !snapshot?.canRedo}
             >
               Redo
@@ -572,7 +664,10 @@ export default function App() {
             <button
               type="button"
               className="btn"
-              onClick={() => sceneRef.current?.resetView(reducedMotion)}
+              onClick={() => {
+                stopDemo();
+                sceneRef.current?.resetView(reducedMotion);
+              }}
             >
               Reset view
             </button>
@@ -581,6 +676,7 @@ export default function App() {
               className="btn"
               aria-pressed={explodeOn}
               onClick={() => {
+                stopDemo();
                 const next = !explodeOn;
                 setExplodeOn(next);
                 controller?.renderer.setExplode(next ? 1 : 0, reducedMotion);
@@ -588,7 +684,14 @@ export default function App() {
             >
               Exploded
             </button>
-            <button type="button" className="btn btn-danger" onClick={() => controller?.reset()}>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => {
+                stopDemo();
+                controller?.reset();
+              }}
+            >
               Reset cube
             </button>
           </div>
