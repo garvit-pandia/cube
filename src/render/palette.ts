@@ -24,9 +24,13 @@ export const BODY_MATERIAL = {
 } as const;
 
 export const STICKER_MATERIAL = {
-  roughness: 0.24,
+  // Glossier than the A/B winner: the critic's read of the first round was
+  // "satin, not showroom plastic" — a tighter clearcoat lobe plus a little
+  // more environment reflection is what separates the two. Kept short of
+  // blowing out the highlights the A/B check warned about.
+  roughness: 0.19,
   metalness: 0,
   clearcoat: 1.0,
-  clearcoatRoughness: 0.08,
-  envMapIntensity: 1.15,
+  clearcoatRoughness: 0.045,
+  envMapIntensity: 1.25,
 } as const;

@@ -421,7 +421,12 @@ export default function App() {
     <div className={`app${sidebarOpen ? '' : ' is-sidebar-collapsed'}`}>
       <header className="header">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-mark" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
           <div>
             <h1>Cube&sup3;</h1>
             <p>3&times;3 Rubik&rsquo;s Cube simulator</p>
@@ -509,8 +514,13 @@ export default function App() {
           aria-label={cubeDescription}
         />
         <div className="stage-hint" aria-hidden="true">
-          Drag a sticker to turn a face or middle slice &middot; drag the background to
-          orbit &middot; scroll to zoom
+          <span className="stage-hint-full">
+            Drag a sticker to turn a face or middle slice &middot; drag the background to
+            orbit &middot; scroll to zoom
+          </span>
+          <span className="stage-hint-compact">
+            Drag to turn &middot; background to orbit
+          </span>
         </div>
         {!sceneReady && (
           <div className="stage-loading" role="status">
@@ -735,6 +745,11 @@ export default function App() {
                 stopDemo();
                 const next = !explodeOn;
                 setExplodeOn(next);
+                // Widen the framing first: the spread lattice is larger than
+                // the assembled cube, and the camera has to make room for it
+                // in the same click or the outer cubelets clip for the whole
+                // tween. Reduced motion snaps both instantly.
+                sceneRef.current?.setContentScale(next ? 1.3 : 1);
                 controller?.renderer.setExplode(next ? 1 : 0, reducedMotion);
               }}
             >

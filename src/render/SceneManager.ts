@@ -21,8 +21,10 @@ function createBackdropTexture(): THREE.CanvasTexture {
   const context = canvas.getContext('2d');
   if (context) {
     const gradient = context.createLinearGradient(0, 0, 0, 256);
-    gradient.addColorStop(0, '#1b2030');
-    gradient.addColorStop(0.45, '#12151f');
+    // Neutral charcoal, matched to the panel's own surfaces: the earlier
+    // blue-hour stops read as a different product next to the dark-Swiss UI.
+    gradient.addColorStop(0, '#1a1b1f');
+    gradient.addColorStop(0.45, '#121316');
     gradient.addColorStop(1, '#07080b');
     context.fillStyle = gradient;
     context.fillRect(0, 0, 4, 256);
@@ -44,8 +46,8 @@ function createFloorGlowTexture(): THREE.CanvasTexture {
       size / 2, size / 2, 0,
       size / 2, size / 2, size / 2,
     );
-    gradient.addColorStop(0, 'rgba(126, 148, 190, 0.34)');
-    gradient.addColorStop(0.42, 'rgba(74, 90, 124, 0.14)');
+    gradient.addColorStop(0, 'rgba(150, 146, 138, 0.2)');
+    gradient.addColorStop(0.42, 'rgba(96, 94, 90, 0.075)');
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
     context.fillStyle = gradient;
     context.fillRect(0, 0, size, size);
@@ -71,9 +73,9 @@ function createContactShadowTexture(): THREE.CanvasTexture {
       size / 2, size / 2, 0,
       size / 2, size / 2, size / 2,
     );
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.62)');
-    gradient.addColorStop(0.34, 'rgba(0, 0, 0, 0.4)');
-    gradient.addColorStop(0.66, 'rgba(0, 0, 0, 0.13)');
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.72)');
+    gradient.addColorStop(0.28, 'rgba(0, 0, 0, 0.46)');
+    gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.12)');
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
     context.fillStyle = gradient;
     context.fillRect(0, 0, size, size);
@@ -122,6 +124,9 @@ export class SceneManager {
   private resetting = false;
   private defaultPosition = new THREE.Vector3();
   private userHasMovedCamera = false;
+  /** Framed subject radius multiplier (1 = assembled cube). */
+  private contentScale = 1;
+  private framingOffset = new THREE.Vector3();
 
   /**
    * Distance at which CONTENT_RADIUS exactly fills the tighter of the two
@@ -131,12 +136,35 @@ export class SceneManager {
   private frameDistance(): number {
     const vFov = THREE.MathUtils.degToRad(this.camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-    return CONTENT_RADIUS / Math.sin(Math.min(vFov, hFov) / 2);
+    return (CONTENT_RADIUS * this.contentScale) / Math.sin(Math.min(vFov, hFov) / 2);
   }
 
   /** Framing distance for the cinema rig (it must not duplicate this math). */
   get framedDistance(): number {
     return this.frameDistance();
+  }
+
+  /**
+   * Grow or shrink the framed subject radius. The exploded lattice is much
+   * larger than the assembled cube, so it needs the camera further back; the
+   * user's chosen angle is preserved (the camera moves radially) and the
+   * clamps move with it. Pass 1 to return to the assembled framing.
+   */
+  setContentScale(scale: number): void {
+    const next = Math.max(scale, 0.5);
+    if (next === this.contentScale) return;
+    this.contentScale = next;
+    const distance = this.frameDistance();
+    this.controls.minDistance = distance * 0.72;
+    this.controls.maxDistance = distance * 2;
+    this.defaultPosition.copy(VIEW_DIRECTION).multiplyScalar(distance).add(CONTENT_CENTER);
+    // Preserve the current orbit angle: only the radius changes. Skipping this
+    // would leave the lattice clipped exactly when the toggle explains itself.
+    this.framingOffset.copy(this.camera.position).sub(this.controls.target);
+    if (this.framingOffset.lengthSq() > 1e-9) {
+      this.framingOffset.setLength(distance);
+      this.camera.position.copy(this.controls.target).add(this.framingOffset);
+    }
   }
   /** Recompute the default camera station for the current aspect ratio. */
   private applyFraming(): void {
@@ -241,7 +269,7 @@ export class SceneManager {
   }
 
   private buildLights(): void {
-    const hemisphere = new THREE.HemisphereLight(0x93a6c4, 0x16161a, 0.22);
+    const hemisphere = new THREE.HemisphereLight(0x9fa4ae, 0x16161a, 0.22);
     this.scene.add(hemisphere);
 
     // Key light sits front-left of the camera axis so the cast shadow lands
@@ -267,11 +295,11 @@ export class SceneManager {
     key.shadow.radius = 14;
     this.scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xc8d6ec, 0.66);
+    const fill = new THREE.DirectionalLight(0xd3d6dd, 0.72);
     fill.position.set(7, 1.5, 4);
     this.scene.add(fill);
 
-    const rim = new THREE.DirectionalLight(0xffc79a, 0.62);
+    const rim = new THREE.DirectionalLight(0xffd8b8, 0.55);
     rim.position.set(2, 3, -7);
     this.scene.add(rim);
   }

@@ -4,6 +4,34 @@ import type { CubeRenderer } from './CubeRenderer';
 import { CONTENT_CENTER } from './SceneManager';
 
 /**
+ * Soft round sprite for the sparks. Default `THREE.Points` draws untextured
+ * squares, which read as confetti pixels; a radial falloff makes each spark a
+ * small glowing dot instead. Built once per page and shared by every burst
+ * (it is a 64px canvas, cheap enough to keep alive for the session).
+ */
+let sparkTexture: THREE.CanvasTexture | null = null;
+
+function sparkSprite(): THREE.CanvasTexture {
+  if (sparkTexture) return sparkTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext('2d');
+  if (context) {
+    const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.92)');
+    gradient.addColorStop(0.72, 'rgba(255, 255, 255, 0.28)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+  }
+  sparkTexture = new THREE.CanvasTexture(canvas);
+  sparkTexture.colorSpace = THREE.SRGBColorSpace;
+  return sparkTexture;
+}
+
+/**
  * Solve-celebration burst: 54 sticker-coloured sparks that fly out, fall,
  * then ease back to their spawn points and get re-absorbed. The rig object
  * is reusable; its frame hook is registered only while a burst is live, and
@@ -88,7 +116,9 @@ export class CelebrationRig {
     this.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
     this.material = new THREE.PointsMaterial({
       vertexColors: true,
-      size: 0.09,
+      size: 0.075,
+      map: sparkSprite(),
+      alphaTest: 0.02,
       transparent: true,
       depthWrite: false,
     });

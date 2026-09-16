@@ -174,7 +174,15 @@ export class CubeRenderer {
     if (this.explode !== 0) {
       this.tmpDir.copy(group.position);
       if (this.tmpDir.lengthSq() > 1e-12) {
-        group.position.addScaledVector(this.tmpDir.normalize(), this.explode * 1.4);
+        // Spread length, paired with SceneManager.setContentScale(1.3) which
+        // the toggle also applies. Assembly geometry: a corner cubelet centre
+        // sits at sqrt(3) ~= 1.732 and its rounded body adds ~0.83, so the
+        // assembled silhouette already reaches the framed radius (2.62).
+        // Every unit of spread therefore has to come back out of the framing:
+        // 1.732 + 0.62 + 0.83 = 3.18, comfortably inside 2.62 x 1.3 = 3.41,
+        // which leaves a ~0.66 gap between neighbouring cubelets - enough to
+        // read as a spread lattice without clipping at the stage edge.
+        group.position.addScaledVector(this.tmpDir.normalize(), this.explode * 0.62);
       }
     }
     const intro = this.intro;
