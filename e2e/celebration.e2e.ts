@@ -19,7 +19,7 @@ test.describe('solve celebration (via __cube3 seam)', () => {
     // Catch the celebration mid-burst: the solved stamp renders on the
     // one-shot justSolved snapshot, before the phase settles to done. Wait
     // past the stamp's fade-in so both it and the burst are visible.
-    await page.waitForSelector('.solved-flash', { timeout: 45_000 });
+    await page.waitForSelector('.solved-flash', { timeout: 90_000 });
     await page.waitForTimeout(300);
     await page.screenshot({ path: '/tmp/opencode/cube3-design/celebration.png' });
     await waitIdle(page);

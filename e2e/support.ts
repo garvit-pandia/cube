@@ -98,8 +98,17 @@ export async function snapshot(page: Page): Promise<CubeSnapshotLike> {
   );
 }
 
-/** Wait until every queued turn has landed and no auto-solve is driving. */
-export async function waitIdle(page: Page, timeout = 45_000): Promise<void> {
+/**
+ * Wait until every queued turn has landed and no auto-solve is driving.
+ *
+ * Budget note: `CubeController.update()` advances exactly one queued turn per
+ * animation frame, so a queue of N moves needs N rendered frames however
+ * short each turn's duration is (`animationScale` cannot make it faster).
+ * Headless software WebGL measures ~2.8 fps here, so a scramble plus a solve
+ * - ~43 turns in the heavier tests - is ~15 s on an idle box. The default is
+ * sized for that plus contention from ambient CPU load, which this box has.
+ */
+export async function waitIdle(page: Page, timeout = 90_000): Promise<void> {
   await page.waitForFunction(
     () => {
       const current = (
@@ -112,11 +121,14 @@ export async function waitIdle(page: Page, timeout = 45_000): Promise<void> {
   );
 }
 
-/** Poll `snapshot()` from Node until `predicate` holds, then return it. */
+/**
+ * Poll `snapshot()` from Node until `predicate` holds, then return it.
+ * Budget matches `waitIdle` for the same frame-throughput reason.
+ */
 export async function pollFor(
   page: Page,
   predicate: (snapshot: CubeSnapshotLike) => boolean,
-  timeout = 45_000,
+  timeout = 90_000,
 ): Promise<CubeSnapshotLike> {
   const deadline = Date.now() + timeout;
   for (;;) {

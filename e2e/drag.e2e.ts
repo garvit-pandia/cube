@@ -121,12 +121,23 @@ test.describe('drag-to-turn (via __cube3 seam)', () => {
     const cx = box.x + box.width / 2;
     const cy = box.y + box.height / 2;
 
-    await enqueueMoves(page, [
-      { face: 'R', turns: 1 },
-      { face: 'U', turns: 1 },
-      { face: 'F', turns: 1 },
-    ]);
-    const during = (await snapshot(page)).history.length;
+    // Baseline before enqueuing: a turn can land in the frame between
+    // enqueueMoves and the snapshot, so reading history afterwards would
+    // sometimes already include a landed turn and make the expected total
+    // unreachable.
+    const before = (await snapshot(page)).history.length;
+    // Twelve turns, not three: each pointer dispatch costs at least one slow
+    // software frame, so a 3-move queue could drain mid-gesture and the drag
+    // would legitimately commit a move - testing nothing. A queue this long
+    // provably outlives the gesture, so the assertion below is exact.
+    const queued = 12;
+    await enqueueMoves(
+      page,
+      Array.from({ length: queued }, (_, index) => ({
+        face: (['R', 'U', 'F'] as const)[index % 3],
+        turns: 1 as const,
+      })),
+    );
 
     // Mid-animation drag: canStart() is false, so the gesture never starts and
     // OrbitControls receives the pointer instead.
@@ -136,7 +147,9 @@ test.describe('drag-to-turn (via __cube3 seam)', () => {
     await page.mouse.up();
     await waitIdle(page);
 
-    const done = await pollFor(page, (s) => s.history.length >= during + 3);
-    expect(done.history).toHaveLength(during + 3);
+    // Exactly the queued turns: had the drag injected one, this would be
+    // `before + queued + 1`.
+    const done = await snapshot(page);
+    expect(done.history).toHaveLength(before + queued);
   });
 });

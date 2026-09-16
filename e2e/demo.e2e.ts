@@ -23,7 +23,7 @@ test.describe('demo loop (via __cube3 seam)', () => {
     const solving = await pollFor(
       page,
       (s) => s.phase === 'solving' || s.solving,
-      60_000,
+      90_000,
     );
     expect(solving.solving || solving.phase === 'solving').toBe(true);
 
