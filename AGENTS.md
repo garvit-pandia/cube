@@ -45,6 +45,10 @@ One turn: `App.playMove` → `CubeController.enqueue()` (queues `{move, record:t
 16. **`solve()` snapshots the log synchronously.** It captures `applied` + the in-flight turn and replaces the queue in one turn; yielding in between would let an unaccounted turn land and break the inversion.
 17. **Drag-to-turn resolves through the model, then the queue** (`src/cube/dragTurn.ts`, `src/render/PointerTurnHandler.ts`). A gesture reads the sticker's world normal and cubelet position from `CubeState` (integer math via `stickerInfo`), never from meshes; the resolved move enters through `enqueue()` like any button press. Every sticker is draggable, and the cubelet's coordinate on the resolved axis selects the layer — ±1 a face, 0 a middle slice (`M`/`E`/`S`) — with the direction following the move convention. The handler intercepts pointerdown in the container's capture phase (so OrbitControls never sees the gesture) and never toggles `controls.enabled`. Drags only start when `canDrag()` is true (queue drained), so the facts the gesture read are the facts it turns.
 18. **`src/cube/min2phase.js` is vendored third-party code** (cs0x7f/min2phase.js, MIT; loaded lazily by `CubeController.loadSolver`). Do not reformat, lint, or refactor it; the only local change is the ESM export shim at the bottom, and it is excluded from oxlint via `ignorePatterns`.
+19. **Cinema owns `controls.enabled`** (`src/render/CinemaRig.ts`). It is the only module allowed to toggle it (explicit camera-owner mode); it stores the prior value on entry, restores it verbatim on exit, and never calls `controls.update()` while it owns the camera. The drag handler never touches it.
+20. **Explode/intro are derived visual offsets** (`src/render/CubeRenderer.ts`). `applyVisualOffset` composes them onto group transforms right after every base→group copy in `sync`, `setLayerRotation`, and `clearLayerRotation`; `basePosition`/`baseQuaternion` are never written (extends #12).
+21. **Demo only drives `record: false` paths** (`src/app/DemoLoop.ts`). It calls `scrambleOptimally`/`solveOptimally` in a loop, so history and the session are never polluted; `stop()` calls `cancelSolve()` mid-solve (extends #14/#15).
+22. **SoundRig and CaptureManager never throw into the solve path** (`src/render/SoundRig.ts`, `src/app/CaptureManager.ts`). Every public method swallows failures; the rig stays dead / capture returns false, and the solve continues silently.
 
 ## Development Commands
 
@@ -81,23 +85,20 @@ Stale-module check (WSL2 polling hazard, below): `curl -s http://localhost:5179/
 - **StrictMode:** `main.tsx` mounts in `<StrictMode>` so the `App` setup effect runs twice in dev — keep setup/teardown symmetric (`App.tsx:53-96`, dispose path `:86-95`).
 - **DEV-only seam** (`App.tsx:75-84`, stripped from prod): `window.__cube3 = { controller, scene, pause(), resume() }` for automated browser checks. Don't add product behaviour there.
 - **Lint** is minimal by design: `react/rules-of-hooks` error, `react/only-export-components` warn; correctness defaults to warn.
-
-## Testing & QA
-
-- Vitest 5, **no vitest config** — defaults (`environment: 'node'`, `globals: false`), so every suite imports `{ describe, expect, it } from 'vitest'` explicitly.
-- **159 tests, 7 colocated unit suites** (`<Module>.test.ts`), all pure logic — no DOM/WebGL/three.js. Plus 11 Playwright e2e tests in `e2e/*.e2e.ts` that drive the real browser through the `__cube3` seam. All green with build + lint.
+- **165 tests, 8 colocated unit suites** (`<Module>.test.ts`), all pure logic — no DOM/WebGL/three.js. Plus 14 Playwright e2e tests in `e2e/*.e2e.ts` that drive the real browser through the `__cube3` seam. All green with build + lint.
 
 | Suite | Pins |
 |---|---|
 | `src/cube/CubeState.test.ts` (74) | 27 cubelets / 54 stickers; `it.each` layer-identity sequences for faces and slices; inverse round-trips; 5000-turn drift invariants; layer selection; Singmaster direction table including M/E/S |
 | `src/session/SolveSession.test.ts` (16) | trimmed Ao5/Ao12, recent-first, persistence round-trip, corrupt-JSON + per-entry validation, 200-record cap, `formatTime` |
 | `src/app/settings.test.ts` (16) | settings defaults/round-trip/corrupt payload/per-field rejection + sidebar-open persistence (corrupt → open, null storage safe) |
+| `src/app/DemoLoop.test.ts` (6) | pure state-machine cycle scrambling→solving→celebrating→resting→scrambling; stop mid-solve cancels once; stop mid-rest clears the timer; double-start no-op; both solver-rejection paths land `off` without throwing |
 | `src/cube/dragTurn.test.ts` (19) | drag→move resolution table (faces and slices); degenerate rejections; 216-combination check that every resolved turn initially moves the sticker along the drag, against `CubeState` conventions |
 | `src/cube/facelets.test.ts` (10) | solved cube → canonical URFDLB string; 9-per-face histogram; solver round-trips on seeded scrambles (≤21 moves) and on slice-mixed states (centres may be permuted); `solutionToMoves` padding + malformed rejection |
 | `src/cube/notation.test.ts` (14) | `simplifyMoves` cancellation/combination invariants (faces and slices) + seeded `invertMoves`→`simplifyMoves` round-trip against `CubeState` (the auto-solve math) |
 | `src/cube/scramble.test.ts` (10) | axis alternation, no back-to-back face/cancellation, full face coverage, seeded reproducibility, parse/format round-trip |
 
-E2E (`e2e/`, Playwright, chromium): optimal solve from scramble ends solved ≤21; replay solve from manual moves ends solved; auto-solve never records; cancel restores prior phase; blocked solver chunk falls back to replay; sticker drags commit valid moves; background drags orbit without turning; face-centre drags turn the middle M/E/S slices; drags are dropped while the queue is busy. The suite sets `controller.animationScale = 0.001` because headless software rendering plus the delta clamp makes real easing crawl.
+E2E (`e2e/`, Playwright, chromium): optimal solve from scramble ends solved ≤21; replay solve from manual moves ends solved; auto-solve never records; cancel restores prior phase; blocked solver chunk falls back to replay; sticker drags commit valid moves; background drags orbit without turning; face-centre drags turn the middle M/E/S slices; drags are dropped while the queue is busy; exploded toggle plays moves then solves with no drift; celebration burst fires with no errors; `?demo=1` autostarts, cycles, and stage-tap stops with the camera restored. The suite sets `controller.animationScale = 0.001` because headless software rendering plus the delta clamp makes real easing crawl.
 
 - New tests: colocate, import vitest explicitly, use seeded `mulberry32(seed)` from `src/test/support.ts` (not `Math.random`), inject fakes (`fakeStorage`, `() => number`). Reuse `expectLegalCube` / `expectIntegralRigidBody` / `independentSolvedCheck` from `CubeState.test.ts`.
 - **Gaps (intentional):** no unit tests for `CubeController` (its solve state machine is covered end-to-end by Playwright), `src/render/` internals, palettes/types, `App`/`main`. Rendering and interaction are verified in a real browser via the `window.__cube3` seam — do not add jsdom to test it.

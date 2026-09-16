@@ -28,6 +28,11 @@ faces and middle slices like a real cube, scramble it, and race the clock.
 | Timer and sessions | Wall-clock timer that starts on your first turn, with best time, Ao5, Ao12 and recent solves saved between visits. |
 | Undo and redo | Undo inverses animate through the same queue as everything else. |
 | Responsive and accessible | Works on phones, respects reduced motion, and announces solves to screen readers. |
+| Demo mode | One toggle (or `?demo=1`) loops scramble → optimal solve → celebration → rest forever, with a slow cinematic orbit. Any button, move pad, keypress, or stage tap stops it. |
+| Exploded view | The **Exploded** toggle eases the 26 cubelets apart into an orbitable lattice; turns, scrambles, and solves keep working while spread, with zero visual drift. |
+| Sound | Synthesized mechanical clicks, scramble whoosh, and solve chime (no audio files), with a settings toggle that silences instantly. |
+| Capture | The **Record** button saves a `cube3-clip.webm` of the canvas plus cube sounds, up to 60 s, via `canvas.captureStream` + the sound rig's audio track. Hidden where unsupported. |
+| Celebration | Solves burst 54 sticker-coloured sparks that fly, fall, and re-absorb, plus a `Solved · {time}` stats stamp on manual solves. |
 
 ## Solve modes
 
@@ -49,8 +54,8 @@ npm run dev      # http://localhost:5179/
 | Command | Effect |
 |---|---|
 | `npm run dev` | Dev server on port 5179 |
-| `npm run test` | Unit tests (159, all pure logic) |
-| `npm run test:e2e` | Browser tests with Playwright (11) |
+| `npm run test` | Unit tests (165, all pure logic) |
+| `npm run test:e2e` | Browser tests with Playwright (14) |
 | `npm run build` | Type-check and build to `dist/` |
 | `npm run lint` | oxlint |
 | `npm run preview` | Serve the built `dist/` |
