@@ -19,6 +19,16 @@ function durationFor(turns: 1 | 2 | 3, scale: number): number {
   return (turns === 2 ? 300 : 230) * scale;
 }
 
+/** Remove the newest matching entry; the `applied` log may hold repeats. */
+function removeLastInstance(log: Move[], move: Move): void {
+  for (let index = log.length - 1; index >= 0; index--) {
+    if (log[index].face === move.face && log[index].turns === move.turns) {
+      log.splice(index, 1);
+      return;
+    }
+  }
+}
+
 /** localStorage is unavailable in some privacy modes; never let that break a solve. */
 function safeLocalStorage(): StorageLike | null {
   try {
@@ -110,6 +120,10 @@ interface QueuedMove {
   readonly record: boolean;
   /** True for turns belonging to the auto-solve animation. */
   readonly solve?: boolean;
+  /** When set, the landing turn cancels this earlier `applied` entry. */
+  readonly undoOf?: Move;
+  /** When set, the landing turn restores this `applied` entry. */
+  readonly redoOf?: Move;
 }
 
 interface ActiveTurn {
@@ -225,11 +239,7 @@ export class CubeController {
     this.scheduleNotify();
   }
 
-  /**
-   * Reverse the newest move. A turn that has not started yet is simply
-   * dropped; one already on screen is undone by playing its inverse, which is
-   * itself not recorded.
-   */
+  /** Reverse the newest user move, after the in-flight turn if any. */
   undo(): void {
     if (this.solving) return;
     if (this.queue.length > 0) {
@@ -241,7 +251,10 @@ export class CubeController {
     const last = this.history.pop();
     if (!last) return;
     this.redoStack.push(last);
-    this.queue.push({ move: invertMove(last), record: false });
+    // The inverse is played through the same queue, unrecorded; when it
+    // lands, `update()` replays the matching inversion on `applied` so replay
+    // still inverts to solved.
+    this.queue.push({ move: invertMove(last), record: false, undoOf: last });
     this.scheduleNotify();
   }
 
@@ -249,7 +262,7 @@ export class CubeController {
     if (this.solving) return;
     const next = this.redoStack.pop();
     if (!next) return;
-    this.queue.push({ move: next, record: true });
+    this.queue.push({ move: next, record: true, redoOf: next });
     this.scheduleNotify();
   }
 
@@ -339,6 +352,7 @@ export class CubeController {
   /**
    * Generate a true random-state scramble using the solver's scrambler.
    * Falls back to axis-alternation if the solver is unavailable.
+   * A scramble starts a new attempt from the solved cube (see scrambleCube).
    */
   async scrambleOptimally(length = 22): Promise<Move[]> {
     if (this.solving || this.isBusy()) return [...this.scramble];
@@ -350,7 +364,7 @@ export class CubeController {
       const solution = api.solve(facelets);
       if (!isSolverError(solution)) {
         const scramble = simplifyMoves(invertMoves(solutionToMoves(solution)));
-        this.redoStack = [];
+        this.beginAttempt();
         for (const move of scramble) this.queue.push({ move, record: false });
         this.scramble = scramble;
         this.phase = 'ready';
@@ -369,11 +383,14 @@ export class CubeController {
    * Scramble the cube. Scramble turns are played through the same queue as
    * user turns so the whole thing animates, but they are not recorded in the
    * move history — the history is the solver's moves, matching a timed solve.
+   * A scramble starts a new attempt from the solved cube: the previous attempt
+   * is already recorded in the session, so history and the replay log restart
+   * here. The state itself resets, so replay inverts exactly this scramble.
    */
   scrambleCube(length = 22): Move[] {
     if (this.solving) return [...this.scramble];
     this.scramble = generateScramble(length);
-    this.redoStack = [];
+    this.beginAttempt();
     for (const move of this.scramble) this.queue.push({ move, record: false });
     this.phase = 'ready';
     this.elapsedMs = 0;
@@ -407,6 +424,24 @@ export class CubeController {
   clearSession(): void {
     this.session.clear();
     this.scheduleNotify();
+  }
+
+  /**
+   * Start a new attempt from the solved cube: drop any queued or in-flight
+   * turn, snap the state and renderer back to identity, and restart the
+   * history, the replay log, and the redo path. `scramble` itself is left for
+   * the caller to set. Both scramble entry points funnel through here so a
+   * scramble can never stack on top of a half-finished cube.
+   */
+  private beginAttempt(): void {
+    this.queue = [];
+    this.redoStack = [];
+    this.history = [];
+    this.applied = [];
+    this.active = null;
+    this.renderer.clearLayerRotation();
+    this.state.reset();
+    this.renderer.sync(this.state.all());
   }
 
   isBusy(): boolean {
@@ -492,7 +527,15 @@ export class CubeController {
 
     if (progress >= 1) {
       this.state.applyMove(active.entry.move);
-      this.applied.push(active.entry.move);
+      if (active.entry.undoOf) {
+        // Undo: the inverse landed, so the undone turn leaves the log.
+        removeLastInstance(this.applied, active.entry.undoOf);
+      } else if (active.entry.redoOf) {
+        // Redo: the re-applied turn rejoins the log.
+        this.applied.push(active.entry.redoOf);
+      } else {
+        this.applied.push(active.entry.move);
+      }
       if (active.entry.solve) this.solveDone++;
       if (active.entry.record) this.history.push(active.entry.move);
       this.active = null;
@@ -505,9 +548,17 @@ export class CubeController {
 
   /** Advance the solve lifecycle once a turn has landed in the logical state. */
   private afterTurnCompleted(entry: QueuedMove): void {
-    // The clock starts on the solver's first real turn, not on the scramble.
+    // The clock starts on the attempt's first real turn, not on the scramble.
     // A user turn still in flight when the auto-solve starts must not tick it.
-    if (!this.solving && entry.record && this.phase !== 'running' && this.phase !== 'done') {
+    if (!this.solving && entry.record && this.phase !== 'running') {
+      if (this.phase === 'done') {
+        // A new manual attempt starts from a solved cube: the previous attempt
+        // is already in the session, so history and the scramble label restart
+        // here, mirroring what a scramble does (see scrambleCube). The push in
+        // update() already ran, so keep just this turn instead of clearing.
+        this.history = [entry.move];
+        this.scramble = [];
+      }
       this.phase = 'running';
       this.startedAt = performance.now();
       this.elapsedMs = 0;

@@ -55,7 +55,7 @@ npm run dev      # http://localhost:5179/
 |---|---|
 | `npm run dev` | Dev server on port 5179 |
 | `npm run test` | Unit tests (165, all pure logic) |
-| `npm run test:e2e` | Browser tests with Playwright (14) |
+| `npm run test:e2e` | Browser tests with Playwright (17) |
 | `npm run build` | Type-check and build to `dist/` |
 | `npm run lint` | oxlint |
 | `npm run preview` | Serve the built `dist/` |
