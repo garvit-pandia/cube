@@ -224,9 +224,24 @@ body {
   animation: status-pulse 1.1s ease-in-out infinite;
 }
 
+.hero-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--danger);
+}
+
+.hero-rec::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: status-pulse 1.1s ease-in-out infinite;
+}
+
 .hero-time {
   font-size: clamp(2.5rem, 5.4vw, 3.25rem);
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
   line-height: 1;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 import { CubeController, type CubeSnapshot } from './app/CubeController';
+import { CaptureManager } from './app/CaptureManager';
 import { DemoLoop } from './app/DemoLoop';
 import {
   DEFAULT_SETTINGS,
@@ -109,6 +110,9 @@ export default function App() {
   const [explodeOn, setExplodeOn] = useState(false);
   const [demoOn, setDemoOn] = useState(false);
   const demoLoopRef = useRef<DemoLoop | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [captureReady, setCaptureReady] = useState(false);
+  const captureRef = useRef<CaptureManager | null>(null);
   const introPlayedRef = useRef(false);
 
   // The sound rig reads this at call time, so toggling the setting in the
@@ -196,6 +200,8 @@ export default function App() {
       cinemaRef.current = null;
       demoLoop.stop();
       demoLoopRef.current = null;
+      captureRef.current?.dispose();
+      captureRef.current = null;
       pointerTurn.dispose();
       unsubscribe();
       controller.renderer.setFrameSource(null);
@@ -240,6 +246,15 @@ export default function App() {
     demoLoopRef.current?.start();
     cinemaRef.current?.setActive(true);
     setDemoOn(true);
+  }, [sceneReady]);
+
+  // Capture support is feature-detected once the scene exists; the Record
+  // button stays hidden entirely when unsupported. Deferred a frame so the
+  // state update never fires synchronously inside the scene-ready effect.
+  useEffect(() => {
+    if (!sceneReady) return;
+    const frame = requestAnimationFrame(() => setCaptureReady(CaptureManager.supported()));
+    return () => cancelAnimationFrame(frame);
   }, [sceneReady]);
 
   useEffect(() => {
@@ -527,6 +542,11 @@ export default function App() {
         <div className="hero-timer">
           <div className="hero-meta">
             <span>{demoOn ? 'Demo' : PHASE_LABEL[phase]}</span>
+            {recording && (
+              <span className="hero-rec" aria-hidden="true">
+                Rec
+              </span>
+            )}
             {phase === 'running' && !demoOn && (
               <span className="hero-run" aria-hidden="true">
                 Running
@@ -661,6 +681,42 @@ export default function App() {
           </div>
           <div className="action-group">
             <p className="action-group-label">Device</p>
+            {captureReady && (
+              <button
+                type="button"
+                className="btn"
+                aria-pressed={recording}
+                onClick={() => {
+                  // A Record click is a user gesture: unlock sound first so
+                  // the muxed audio track exists even with no prior input.
+                  soundRef.current?.unlock();
+                  const scene = sceneRef.current;
+                  if (!scene) return;
+                  if (recording) {
+                    captureRef.current?.stop();
+                    setRecording(false);
+                    return;
+                  }
+                  const canvas = scene.renderer.domElement;
+                  const manager = new CaptureManager(canvas, soundRef.current?.audioTrack ?? null);
+                  manager.onSaved = (blob, extension) => {
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `cube3-clip.${extension}`;
+                    document.body.appendChild(anchor);
+                    anchor.click();
+                    anchor.remove();
+                    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+                  };
+                  captureRef.current?.dispose();
+                  captureRef.current = manager;
+                  if (manager.start()) setRecording(true);
+                }}
+              >
+                {recording ? 'Stop' : 'Record'}
+              </button>
+            )}
             <button
               type="button"
               className="btn"
